@@ -1,2 +1,13 @@
 # RAFT-db-cli
-local key-value db, using the RAFT algorithm. Go
+Fault-tolerant distributed local database system using the RAFT algorithm. Golang
+
+# Resources (links)
+
+* go implemenation of RAFT protocol https://github.com/hashicorp/raft
+* https://medium.com/@govinda.attal/raft-consensus-leader-election-with-golang-89bfdbd471cb
+
+# About project
+
+# Quick start
+
+# Demonstration of the functionality

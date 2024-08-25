@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package raft_v1;
+
+option go_package = "pkg/raft/raft_cluster_v1";
+service ClusterNode {
+    // Common
+    rpc LoadLog(LogInfo) returns (LogAccept);
+    rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
+    
+    // Follower
+    rpc SetLeader(LeadInfo) returns (LeadAccept);
+    
+    // Lead
+    rpc SendHeartBeat(HeartBeatRequest) returns (HeartBeatResponse);
+    
+    // Candidate
+    rpc StartElection(Empty) returns (ElectionDecision);
+}
+
+message LogInfo {
+    string id = 1;
+
+    // In the Raft protocol, each node must store a term for each entry in its log
+    int64 term = 2;
+    int64 index = 3;
+    string jsonString = 4;
+}
+
+message LogAccept {
+    bool accept = 1;
+    int64 term = 2;
+}
+
+message LeadInfo {
+    string idLeader = 1;
+
+    // we send term in all request and responses to controll sync with all nodes in cluster
+    // if follower get a req with lower term - he ignored this req and responsed actual term
+    int64 term = 2;
+}
+
+message LeadAccept {
+    bool accept = 1;
+    int64 term = 2;
+}
+
+message ElectionDecision {
+    bool vote = 1;
+    int64 term = 2;
+}
+
+message RequestVoteRequest {
+    int64 term = 1;
+    int64 lastLogIndex = 2;
+    int64 lastLogTerm = 3;
+}
+
+message RequestVoteResponse {
+    bool vote = 1;
+    int64 term = 2;
+}
+
+message HeartBeatRequest {
+    int64 term = 1;
+    string leaderId = 2;
+
+    // index - increment value ([index]logs)
+    int64 prevLogIndex = 3;
+    int64 prevLogTerm = 4;
+    repeated LogInfo entries = 5;
+    int64 leaderCommit = 6;
+}
+
+message HeartBeatResponse {
+    int64 term = 1;
+    bool success = 2;
+}
+
+message Empty {
+}
+
+
+

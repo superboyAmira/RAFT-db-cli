@@ -6,5 +6,6 @@ import (
 
 type Instance struct {
 	Id       uuid.UUID
-	JsonData string
+	JsonData string // here must be a special json struct maybe 
+	Err string
 }

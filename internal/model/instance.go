@@ -5,7 +5,11 @@ import (
 )
 
 type Instance struct {
-	Id       uuid.UUID
-	JsonData string // here must be a special json struct maybe 
-	Err string
+	Id      uuid.UUID
+	Content JsonData
+	Term    int64
+}
+
+type JsonData struct {
+	Name string `json:"name"`
 }

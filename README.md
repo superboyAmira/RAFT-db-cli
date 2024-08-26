@@ -1,6 +1,12 @@
 # RAFT-db-cli
 Fault-tolerant distributed local database system using the RAFT algorithm. Golang
 
+## Tech Stack
+
+* Go 1.22.3
+* GRPC + protobuf
+* Mockery
+
 # Resources (links)
 
 * go implemenation of RAFT protocol https://github.com/hashicorp/raft

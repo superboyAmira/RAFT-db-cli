@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strconv"
+	"sync"
 	"warehouse/internal/model"
 	"warehouse/pkg/raft/raft_cluster_v1"
 
@@ -38,32 +39,36 @@ const (
 )
 
 type ClusterNodeServer struct {
-	idNode int
-	term   int64
-	state  StateType
+	IdNode int
+	Term   int64
+	State  StateType
 
-	logs     []model.Instance
-	sizeLogs int
+	Logs     []model.Instance
+	mu       sync.RWMutex
+	SizeLogs int
 
 	raft_cluster_v1.UnimplementedClusterNodeServer
 }
 
 // Writing data to the node storage [Follower method]
 func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.LogInfo) (*raft_cluster_v1.LogAccept, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	
 	Saved := &raft_cluster_v1.LogAccept{
 		Accept: true,
-		Term:   r.term,
+		Term:   r.Term,
 	}
 	NotSaved := &raft_cluster_v1.LogAccept{
 		Accept: false,
-		Term:   r.term,
+		Term:   r.Term,
 	}
 
 	// check node role
-	if r.state != Follower {
+	if r.State != Follower {
 		return NotSaved, errors.New("forbidden, not saved")
 	}
-	if r.term > req.Term {
+	if r.Term > req.Term {
 		return NotSaved, errors.New("leader is not legitimate, not saved")
 	}
 
@@ -74,18 +79,20 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 			// rollback
 			if rec := recover(); rec != nil {
 				// if log added delete him
-				if r.logs[r.sizeLogs-1].Id.String() == req.Id {
-					r.logs = slices.Delete(r.logs, int(r.sizeLogs-2), int(r.sizeLogs-1))
+				if r.SizeLogs > 0 {
+					if r.Logs[r.SizeLogs-1].Id.String() == req.Id {
+						r.Logs = r.Logs[:len(r.Logs)-1]
+					}
 				}
 				// DEBUG needed!!!
 				// if term is correct, deactivate node
 				// if req.Term > r.term {
 				// }
-				commit <- errors.New("panic handled on node " + strconv.FormatInt(int64(r.idNode), 10))
+				commit <- errors.New("panic handled on node " + strconv.FormatInt(int64(r.IdNode), 10))
 			}
 		}()
 
-		r.logs = slices.Insert(r.logs, int(req.Index), model.Instance{
+		r.Logs = slices.Insert(r.Logs, int(req.Index), model.Instance{
 			Id:      uuid.New(),
 			Content: model.JsonData{Name: req.JsonString},
 			Term:    req.Term,
@@ -96,16 +103,19 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 	// control for context
 	select {
 	case <-ctx.Done():
-		if r.logs[r.sizeLogs-1].Id.String() != req.Id {
-			return NotSaved, errors.New("ctx done, not saved")
+		if r.SizeLogs > 0 {
+			if r.Logs[r.SizeLogs-1].Id.String() == req.Id {
+				r.Logs = slices.Delete(r.Logs, int(r.SizeLogs-2), int(r.SizeLogs-1))
+			}
 		}
-		return Saved, nil
+		return NotSaved, errors.New("ctx done, not saved")
+
 	case err := <-commit:
 		if err != nil {
 			return NotSaved, err
 		} else {
-			r.term = req.Term
-			r.sizeLogs = len(r.logs)
+			r.Term = req.Term
+			r.SizeLogs = len(r.Logs)
 			return Saved, nil
 		}
 	}
@@ -113,39 +123,43 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 
 // Requesting vote from Candidate to Follower [Follower method]
 func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v1.RequestVoteRequest) (*raft_cluster_v1.RequestVoteResponse, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	
 	yes := &raft_cluster_v1.RequestVoteResponse{
 		Vote: true,
-		Term: r.term,
+		Term: r.Term,
 	}
 	no := &raft_cluster_v1.RequestVoteResponse{
 		Vote: false,
-		Term: r.term,
+		Term: r.Term,
 	}
 	commit := make(chan error)
 	go func() {
 		defer func() {
 			// panic handler
 			if rec := recover(); rec != nil {
-				commit <- errors.New("panic handled on node " + strconv.FormatInt(int64(r.idNode), 10))
+				commit <- errors.New("panic handled on node " + strconv.FormatInt(int64(r.IdNode), 10))
 			}
 		}()
-		if r.term > req.Term {
+
+		if r.Term > req.Term {
 			commit <- errors.New("voter's term greather, candidate not legitimate")
 		} else {
 			// if request was sendet to high level nodes, they changing their state
 			// it doesn`t mean that they always responsed 'yes', need check relevance logs
-			if r.state == Lead || r.state == Candidate {
-				r.state = Follower
+			if r.State == Lead || r.State == Candidate {
+				r.State = Follower
 			}
 			// check relevance logs
-			if req.LastLogTerm > r.logs[r.sizeLogs-1].Term {
+			if req.LastLogTerm > r.Logs[r.SizeLogs-1].Term {
 				// term more than our -> relevated, vote yes
 				commit <- nil
-			} else if req.LastLogTerm < r.logs[r.sizeLogs-1].Term {
+			} else if req.LastLogTerm < r.Logs[r.SizeLogs-1].Term {
 				commit <- errors.New("voter's term last log greather, candidate not legitimate")
 			} else {
 				// if terms equal checking lenght of logs
-				switch req.LastLogIndex > int64(r.sizeLogs) {
+				switch req.LastLogIndex > int64(r.SizeLogs) {
 				case true:
 					commit <- nil
 				case false:
@@ -163,7 +177,7 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 		if err != nil {
 			return no, err
 		} else {
-			r.term = req.Term
+			r.Term = req.Term
 			return yes, nil
 		}
 	}

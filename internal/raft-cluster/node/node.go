@@ -73,8 +73,15 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 	}
 
 	// if role is follower -> saving
-	commit := make(chan error)
+	commit := make(chan error, 1) // buffer chan for correct select construction
 	go func() {
+		// for possible routine leaks with ctx cancel
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		defer func() {
 			// rollback
 			if rec := recover(); rec != nil {
@@ -123,9 +130,6 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 
 // Requesting vote from Candidate to Follower [Follower method]
 func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v1.RequestVoteRequest) (*raft_cluster_v1.RequestVoteResponse, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	
 	yes := &raft_cluster_v1.RequestVoteResponse{
 		Vote: true,
 		Term: r.Term,
@@ -134,14 +138,18 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 		Vote: false,
 		Term: r.Term,
 	}
-	commit := make(chan error)
+
+	commit := make(chan error, 1)
 	go func() {
-		defer func() {
-			// panic handler
-			if rec := recover(); rec != nil {
-				commit <- errors.New("panic handled on node " + strconv.FormatInt(int64(r.IdNode), 10))
-			}
-		}()
+		// for possible routine leaks with ctx cancel
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		r.mu.Lock()
+		defer r.mu.Unlock()
 
 		if r.Term > req.Term {
 			commit <- errors.New("voter's term greather, candidate not legitimate")
@@ -177,7 +185,9 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 		if err != nil {
 			return no, err
 		} else {
+			r.mu.Lock()
 			r.Term = req.Term
+			r.mu.Unlock()
 			return yes, nil
 		}
 	}

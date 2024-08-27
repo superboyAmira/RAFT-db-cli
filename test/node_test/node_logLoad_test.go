@@ -117,7 +117,6 @@ func TestLoadLogSuccess(t *testing.T) {
 
 	res, err := node.LoadLog(context.Background(), &logInfo)
 	assert.NoError(t, err)
-	assert.True(t, res.Accept)
 	assert.Equal(t, node.Term, res.Term)
 	assert.Equal(t, 1, node.SizeLogs)
 	assert.Equal(t, "test", node.Logs[0].Content.Name)

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"time"
 	"warehouse/internal/model"
 	"warehouse/pkg/raft/raft_cluster_v1"
 
@@ -27,6 +28,11 @@ const (
 	initClusterSize   = 3
 	quorum            = 2 // roundUp(initClusterSize)/2
 	replicationFactor = 2
+
+	// follower mutate to candidate after the HeartBeatTimeout expires 
+	HeartBeatTimeout = time.Second * 3
+	// lead must send a heartbeats to followers every second
+	HeartBeatIntervalLeader = time.Second * 1
 )
 
 // Node current role in custer
@@ -40,12 +46,14 @@ const (
 
 type ClusterNodeServer struct {
 	IdNode int
-	Term   int64
-	State  StateType
-
 	Logs     []model.Instance
 	mu       sync.RWMutex
 	SizeLogs int
+
+	Term   int64
+	State  StateType
+	Network []ClusterNodeServer
+	LeadId int
 
 	raft_cluster_v1.UnimplementedClusterNodeServer
 }
@@ -54,22 +62,13 @@ type ClusterNodeServer struct {
 func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.LogInfo) (*raft_cluster_v1.LogAccept, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
-	Saved := &raft_cluster_v1.LogAccept{
-		Accept: true,
-		Term:   r.Term,
-	}
-	NotSaved := &raft_cluster_v1.LogAccept{
-		Accept: false,
-		Term:   r.Term,
-	}
 
 	// check node role
 	if r.State != Follower {
-		return NotSaved, errors.New("forbidden, not saved")
+		return &raft_cluster_v1.LogAccept{ Term: r.Term }, errors.New("forbidden, not saved")
 	}
 	if r.Term > req.Term {
-		return NotSaved, errors.New("leader is not legitimate, not saved")
+		return &raft_cluster_v1.LogAccept{ Term: r.Term }, errors.New("leader is not legitimate, not saved")
 	}
 
 	// if role is follower -> saving
@@ -115,30 +114,23 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 				r.Logs = slices.Delete(r.Logs, int(r.SizeLogs-2), int(r.SizeLogs-1))
 			}
 		}
-		return NotSaved, errors.New("ctx done, not saved")
+		return &raft_cluster_v1.LogAccept{ Term: r.Term }, errors.New("ctx done, not saved")
 
 	case err := <-commit:
 		if err != nil {
-			return NotSaved, err
+			return &raft_cluster_v1.LogAccept{ Term: r.Term }, err
 		} else {
+			r.mu.Lock()
 			r.Term = req.Term
 			r.SizeLogs = len(r.Logs)
-			return Saved, nil
+			r.mu.Unlock()
+			return &raft_cluster_v1.LogAccept{ Term: r.Term }, nil
 		}
 	}
 }
 
 // Requesting vote from Candidate to Follower [Follower method]
 func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v1.RequestVoteRequest) (*raft_cluster_v1.RequestVoteResponse, error) {
-	yes := &raft_cluster_v1.RequestVoteResponse{
-		Vote: true,
-		Term: r.Term,
-	}
-	no := &raft_cluster_v1.RequestVoteResponse{
-		Vote: false,
-		Term: r.Term,
-	}
-
 	commit := make(chan error, 1)
 	go func() {
 		// for possible routine leaks with ctx cancel
@@ -180,16 +172,67 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 	// control for context
 	select {
 	case <-ctx.Done():
-		return no, errors.New("[node.go:]ctx done, not saved")
+		return &raft_cluster_v1.RequestVoteResponse{ Term: r.Term }, errors.New("ctx done, not saved")
 	case err := <-commit:
 		if err != nil {
-			return no, err
+			return &raft_cluster_v1.RequestVoteResponse{ Term: r.Term }, err
 		} else {
 			r.mu.Lock()
 			r.Term = req.Term
 			r.mu.Unlock()
-			return yes, nil
+			return &raft_cluster_v1.RequestVoteResponse{ Term: r.Term }, nil
 		}
+	}
+}
+
+// after the HeartBeatTimeout expires folower start election and send RequestVote to all nodes [Candidate method]
+func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster_v1.Empty) (*raft_cluster_v1.ElectionDecision, error) {
+	if r.State != Follower {
+		return &raft_cluster_v1.ElectionDecision{ Term: r.Term }, errors.New("state unsuppoted to election")
+	}
+
+	commit := make(chan error, 1)
+	go func ()  {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		// we update r.Term with new election
+		LastLogTerm := r.Term + 1
+		LastLogIndex := 0
+		if r.SizeLogs > 0 {
+			LastLogTerm = r.Logs[r.SizeLogs-1].Term
+			LastLogIndex = r.SizeLogs-1
+		}
+		// mutate to Candidate
+		r.State = Candidate
+
+		for _, node := range r.Network {
+			bulletin, err := node.RequestVote(ctx, &raft_cluster_v1.RequestVoteRequest{
+				Term: r.Term,
+				LastLogTerm: LastLogTerm,
+				LastLogIndex: int64(LastLogIndex),
+			})
+
+			if err != nil {
+				if bulletin.Term > r.Term {
+					r.Term = bulletin.Term
+				}
+				r.State = Follower
+				commit <- err
+			}
+		}
+	}()
+
+
+	// control for context
+	select {
+	case <-ctx.Done():
+		return &raft_cluster_v1.ElectionDecision{ Term: r.Term }, errors.New("ctx done, not saved")
+	case err := <-commit:
+		return &raft_cluster_v1.ElectionDecision{ Term: r.Term }, err
 	}
 }
 
@@ -197,5 +240,3 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 // SetLeader(context.Context, *LeadInfo) (*LeadAccept, error)
 // // Lead
 // SendHeartBeat(context.Context, *HeartBeatRequest) (*HeartBeatResponse, error)
-// // Candidate
-// StartElection(context.Context, *Empty) (*ElectionDecision, error)

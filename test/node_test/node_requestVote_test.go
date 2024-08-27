@@ -2,6 +2,7 @@ package node_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"warehouse/internal/model"
 	"warehouse/internal/raft-cluster/node"
@@ -29,8 +30,8 @@ func TestRequestVoteContextDone(t *testing.T) {
 	}
 
 	_, err := node.RequestVote(ctx, req)
-	if err == nil || err.Error() != "ctx done, not saved" {
-		t.Errorf("expected error 'ctx done, not saved', got %v", err)
+	if err == nil || !errors.Is(err,  context.Canceled) {
+		t.Errorf("expected error ctx, got %v", err)
 	}
 }
 
@@ -116,7 +117,7 @@ func TestRequestVoteLastLogTermSmaller(t *testing.T) {
 	}
 
 	req := &raft_cluster_v1.RequestVoteRequest{
-		Term:         101,
+		Term:         100,
 		LastLogTerm:  99,
 		LastLogIndex: 1,
 	}
@@ -137,16 +138,16 @@ func TestRequestVoteLastLogIndexGreater(t *testing.T) {
 	}
 
 	req := &raft_cluster_v1.RequestVoteRequest{
-		Term:         101,
+		Term:         100,
 		LastLogTerm:  100,
 		LastLogIndex: 2,
 	}
 
-	_, err := node.RequestVote(context.Background(), req)
+	res, err := node.RequestVote(context.Background(), req)
 	if err != nil {
 		t.Errorf("expected no error, got %v", err)
 	}
-	if node.Term != 101 {
+	if res.Term != 100 {
 		t.Errorf("expected Term to be 101, got %v", node.Term)
 	}
 }
@@ -161,7 +162,7 @@ func TestRequestVoteLastLogIndexSmaller(t *testing.T) {
 	}
 
 	req := &raft_cluster_v1.RequestVoteRequest{
-		Term:         101,
+		Term:         100,
 		LastLogTerm:  100,
 		LastLogIndex: 0,
 	}

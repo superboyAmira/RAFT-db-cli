@@ -2,6 +2,7 @@ package node_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 	"warehouse/internal/model"
@@ -96,8 +97,8 @@ func TestLoadLogContextTimeout(t *testing.T) {
 	time.Sleep(10 * time.Millisecond) // Ensure the context has expired
 
 	_, err := node.LoadLog(ctx, &logInfo)
-	if err == nil || err.Error() != "ctx done, not saved" {
-		t.Errorf("expected error 'ctx done, not saved', got %v", err)
+	if err == nil || !errors.Is(err,  context.Canceled) {
+		t.Errorf("expected ctx.Canceled', got %v", err)
 	}
 }
 

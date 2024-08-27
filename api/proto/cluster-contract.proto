@@ -32,7 +32,7 @@ message LogAccept {
 }
 
 message LeadInfo {
-    string idLeader = 1;
+    int64 idLeader = 1;
 
     // we send term in all request and responses to controll sync with all nodes in cluster
     // if follower get a req with lower term - he ignored this req and responsed actual term

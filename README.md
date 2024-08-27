@@ -5,7 +5,6 @@ Fault-tolerant distributed local database system using the RAFT algorithm. Golan
 
 * Go 1.22.3
 * GRPC + protobuf
-* Mockery
 
 # Resources (links)
 

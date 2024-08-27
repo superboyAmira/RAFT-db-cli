@@ -152,7 +152,7 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 		defer r.mu.Unlock()
 
 		if r.Term > req.Term {
-			commit <- errors.New("voter's term greather, candidate not legitimate")
+			commit <- errors.New("voter's term greater, candidate not legitimate")
 		} else {
 			// if request was sendet to high level nodes, they changing their state
 			// it doesn`t mean that they always responsed 'yes', need check relevance logs
@@ -164,14 +164,14 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 				// term more than our -> relevated, vote yes
 				commit <- nil
 			} else if req.LastLogTerm < r.Logs[r.SizeLogs-1].Term {
-				commit <- errors.New("voter's term last log greather, candidate not legitimate")
+				commit <- errors.New("voter's term last log greater, candidate not legitimate")
 			} else {
 				// if terms equal checking lenght of logs
-				switch req.LastLogIndex > int64(r.SizeLogs) {
+				switch req.LastLogIndex >= int64(r.SizeLogs) {
 				case true:
 					commit <- nil
 				case false:
-					commit <- errors.New("voters's logs more completely, candidate not legitimate")
+					commit <- errors.New("voter's logs more complete, candidate not legitimate")
 				}
 			}
 		}

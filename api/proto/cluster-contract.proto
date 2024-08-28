@@ -4,18 +4,23 @@ package raft_v1;
 
 option go_package = "pkg/raft/raft_cluster_v1";
 service ClusterNode {
-    // Common
-    rpc LoadLog(LogInfo) returns (LogAccept);
-    rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
-    
     // Follower
+    rpc LoadLog(LogInfo) returns (LogAccept);
     rpc SetLeader(LeadInfo) returns (LeadAccept);
+    rpc ReciveHeartBeat(HeartBeatRequest) returns (HeartBeatResponse);
     
     // Lead
-    rpc SendHeartBeat(HeartBeatRequest) returns (HeartBeatResponse);
+    rpc SendHeartBeat(Empty) returns (Empty);
+    rpc Append(LogLeadRequest) returns (Empty);
     
     // Candidate
     rpc StartElection(Empty) returns (ElectionDecision);
+    rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
+}
+
+message LogLeadRequest {
+    string id = 1;
+    string jsonString = 2;
 }
 
 message LogInfo {
@@ -59,13 +64,11 @@ message RequestVoteResponse {
 
 message HeartBeatRequest {
     int64 term = 1;
-    string leaderId = 2;
+    int64 leaderId = 2;
 
     // index - increment value ([index]logs)
     int64 prevLogIndex = 3;
     int64 prevLogTerm = 4;
-    repeated LogInfo entries = 5;
-    int64 leaderCommit = 6;
 }
 
 message HeartBeatResponse {

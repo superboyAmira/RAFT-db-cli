@@ -12,6 +12,8 @@ package node
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"net"
 	"slices"
 	"strconv"
 	"sync"
@@ -20,12 +22,12 @@ import (
 	"warehouse/pkg/raft/raft_cluster_v1"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
 )
 
 // Global cluster settings
 type ClusterSettings struct {
 	Host string `json:"cluster_host"`
-	Port string
 
 	Size              int `json:"cluster_size"`
 	Quorum            int `json:"quorum"` // roundUp(initClusterSize)/2
@@ -34,17 +36,6 @@ type ClusterSettings struct {
 	HeartBeatTimeout        time.Duration // follower mutate to candidate after the HeartBeatTimeout expires
 	HeartBeatIntervalLeader time.Duration // lead must send a heartbeats to followers every second
 }
-
-// const (
-// 	initClusterSize   = 3
-// 	quorum            = 2
-// 	replicationFactor = 2
-
-//
-// 	HeartBeatTimeout = time.Second * 3
-//
-// 	HeartBeatIntervalLeader = time.Second * 1
-// )
 
 // Node current role in custer
 type StateType int
@@ -74,49 +65,45 @@ type ClusterNodeServer struct {
 	raft_cluster_v1.UnimplementedClusterNodeServer
 }
 
-// constructor
-func New(idNode int, state StateType, leadId int, network []*ClusterNodeServer, sett *ClusterSettings) *ClusterNodeServer {
+// Cluster node constructor
+func New(idNode int, state StateType, leadId int, sett *ClusterSettings) *ClusterNodeServer {
 	return &ClusterNodeServer{
 		Settings:           sett,
 		IdNode:             idNode,
-		Logs:               make([]model.Instance, 0), // Инициализация пустого слайса
+		Logs:               make([]model.Instance, 0),
 		SizeLogs:           0,
 		Term:               0,
 		State:              state,
-		Network:            network,
+		Network:            make([]*ClusterNodeServer, 0),
 		LeadId:             leadId,
-		timeLastHeartBreak: make(map[int]time.Time), // Инициализация пустой карты
+		timeLastHeartBreak: make(map[int]time.Time),
 		mu:                 sync.RWMutex{},
 	}
 }
 
 // Start node server on random free port and fixed host form cfg
-func (r *ClusterNodeServer) Serve(stop <-chan struct{}) error {
-	// listen, err := net.Listen("tcp", config.Port)
+func (r *ClusterNodeServer) Serve(ctx context.Context, log *slog.Logger) error {
+	listen, err := net.Listen("tcp", ":0") // random free prot on host
+	if err != nil {
+		log.Warn("Failed to listen", slog.Int("node_id", r.IdNode), slog.String("error", err.Error()))
+		return err
+	}
 
-	// if err != nil {
-	// 	log.Fatalf("Failed to listen: %v", err)
-	// }
+	server := grpc.NewServer()
+	raft_cluster_v1.RegisterClusterNodeServer(server, &ClusterNodeServer{})
 
-	// server := grpc.NewServer()
-	// raft_cluster_v1.RegisterClusterNodeServer(server, &transmitter.ConnServer{})
-
-	// quit := make(chan os.Signal, 1)
-	// signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT, syscall.SIGINT, syscall.SIGTSTP)
-
-	// log.Printf("Server is running on port %s", config.Port)
-	// go func() {
-	// 	if err := server.Serve(listen); err != nil {
-	// 		log.Fatalf("Failed to serve: %v", err)
-	// 	}
-	// }()
-	<-stop
-	// sercer.GracefulyStop()
-
+	log.Debug("Node is running on port", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
+	go func() {
+		if err := server.Serve(listen); err != nil {
+			log.Error("Failed to serve ", slog.Int("node_id", r.IdNode), slog.String("error", err.Error()))
+		}
+	}()
+	<-ctx.Done()
+	log.Debug("Shurdown...", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
+	server.GracefulStop()
+	log.Debug("Stopped Gracefully...", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
 	return nil
 }
-
-func (r *ClusterNodeServer) Stop() {}
 
 // Writing data to the node storage
 func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.LogInfo) (*raft_cluster_v1.LogAccept, error) {

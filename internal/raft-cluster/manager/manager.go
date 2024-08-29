@@ -1,15 +1,18 @@
 package manager
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"sync"
+	"time"
 	cluster_node "warehouse/internal/raft-cluster/node"
 )
 
 const (
-	cfgPath = "../../../configs/config.json"
+	cfgPath = "../../configs/config.json"
 )
 
 type Manager struct {
@@ -17,12 +20,13 @@ type Manager struct {
 	activeNodes []*cluster_node.ClusterNodeServer
 	leadId      int
 
-	stop chan struct{}
-	wg   sync.WaitGroup
-	mu   sync.Mutex
+	ctx context.Context
+	stopCluster context.CancelFunc
+	wg  sync.WaitGroup
+	mu  sync.Mutex
 }
 
-func (r *Manager) StartCluster() error {
+func (r *Manager) StartCluster(log *slog.Logger) error {
 	if len(r.cluster) > 0 {
 		return errors.New("alredy running")
 	}
@@ -36,11 +40,11 @@ func (r *Manager) StartCluster() error {
 	r.cluster = make([]*cluster_node.ClusterNodeServer, settings.Size)
 	r.leadId = 0
 	for i, state := 0, cluster_node.Lead; i < settings.Size; i++ {
-		r.cluster[i] = cluster_node.New(i, state, r.leadId, nil, settings)
+		r.cluster[i] = cluster_node.New(i, state, r.leadId, settings)
 		state = cluster_node.Follower
 	}
 	for i, node := range r.cluster {
-		for i_cl := 0; i < settings.Size; i_cl++ {
+		for i_cl := 0; i_cl < settings.Size; i_cl++ {
 			if i_cl != i {
 				node.Network = append(node.Network, r.cluster[i_cl])
 			}
@@ -51,30 +55,42 @@ func (r *Manager) StartCluster() error {
 	r.activeNodes = make([]*cluster_node.ClusterNodeServer, 0)
 
 	r.mu = sync.Mutex{}
-	r.stop = make(chan struct{}, 1)
+	r.ctx, r.stopCluster = context.WithCancel(context.Background())
+	countActive := 0
 	for _, node := range r.cluster {
 		r.wg.Add(1)
 		go func() {
 			defer r.wg.Done()
-			err := node.Serve(r.stop)
+			err := node.Serve(r.ctx, log)
 			if err == nil {
 				r.mu.Lock()
+				countActive--
 				r.activeNodes = append(r.activeNodes, node)
 				r.mu.Unlock()
 			}
 		}()
+		countActive++
 	}
+	time.Sleep(1*time.Second)
 	// check minimal cluster size requierment
-	if len(r.activeNodes) < settings.ReplicationFactor {
-		r.stop <- struct{}{}
+	if countActive < settings.ReplicationFactor {
+		r.GracefullyStop()
 		return errors.New("interal server error with nodes, replication factor not required")
 	}
 	return nil
 }
 
 func (r *Manager) GracefullyStop() {
-	r.stop <- struct{}{}
+	r.stopCluster()
 	r.wg.Wait()
+}
+
+func (r *Manager) SetLog(uuid, jsonString string) (error) {
+	if len(r.cluster) == 0 {
+		return errors.New("didn't running")
+	}
+
+	return nil
 }
 
 func loadCfg() (*cluster_node.ClusterSettings, error) {

@@ -22,8 +22,9 @@ const (
 )
 
 type Manager struct {
+	globalClient raft_cluster_v1.ClusterNodeClient
+
 	cluster     []*cluster_node.ClusterNodeServer
-	activeNodes []*cluster_node.ClusterNodeServer
 	leadId      int
 
 	ctx context.Context
@@ -47,20 +48,19 @@ func (r *Manager) StartCluster(log *slog.Logger) error {
 	r.cluster = make([]*cluster_node.ClusterNodeServer, settings.Size)
 	r.leadId = 0
 
-	r.activeNodes = make([]*cluster_node.ClusterNodeServer, 0)
-
 	r.mu = sync.Mutex{}
 	r.ctx, r.stopCluster = context.WithCancel(context.Background())
 	countActive := 0
 
-	for i, state := 0, cluster_node.Lead; i < settings.Size; i++ {
+	// we have 2 fields state and initTerm for lead primary settings, without primary election
+	for i, state, initTerm := 0, cluster_node.Lead, 1; i < settings.Size; i++ {
 		port, err := getFreePort()
 		if err != nil {
 			continue
 		}
-		tSettings := settings
+		tSettings := *settings
 		tSettings.Port = ":" + strconv.FormatInt(int64(port), 10)
-		r.cluster[i] = cluster_node.New(i, state, r.leadId, settings)
+		r.cluster[i] = cluster_node.New(i, state, r.leadId, initTerm, &tSettings)
 		r.wg.Add(1)
 		go func(id int) {
 			defer r.wg.Done()
@@ -71,7 +71,9 @@ func (r *Manager) StartCluster(log *slog.Logger) error {
 				r.mu.Unlock()
 			}
 		}(i)
+		// change fields for followers
 		state = cluster_node.Follower
+		initTerm = 0
 		countActive++
 		// waiting for the node to start so that the system issues a new port
 		time.Sleep(5*time.Millisecond)
@@ -97,6 +99,16 @@ func (r *Manager) StartCluster(log *slog.Logger) error {
             }
         }
     }
+
+	// create client for operations with cluster per Leader
+	conn, err := grpc.NewClient("localhost"+r.cluster[r.leadId].Settings.Port,
+	grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		log.Warn("Failed to create gRPC client",  slog.Int("node_id", r.leadId), slog.String("error", err.Error()))
+		r.GracefullyStop()
+	}
+	r.globalClient = raft_cluster_v1.NewClusterNodeClient(conn)
+
 	log.Debug("Cluster started")
 
 	return nil
@@ -107,12 +119,17 @@ func (r *Manager) GracefullyStop() {
 	r.wg.Wait()
 }
 
-func (r *Manager) SetLog(uuid, jsonString string) (error) {
+func (r *Manager) SetLog(uuid, jsonString string, log *slog.Logger) (error) {
 	if len(r.cluster) == 0 {
 		return errors.New("didn't running")
 	}
+	req := &raft_cluster_v1.LogLeadRequest{
+		Id: uuid,
+		JsonString: jsonString,
+	}
 
-	return nil
+	_, err := r.globalClient.Append(r.ctx, req)
+	return err
 }
 
 func loadCfg() (*cluster_node.ClusterSettings, error) {

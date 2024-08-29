@@ -67,13 +67,13 @@ type ClusterNodeServer struct {
 }
 
 // Cluster node constructor
-func New(idNode int, state StateType, leadId int, sett *ClusterSettings) *ClusterNodeServer {
+func New(idNode int, state StateType, leadId int, term int, sett *ClusterSettings) *ClusterNodeServer {
 	return &ClusterNodeServer{
 		Settings:           sett,
 		IdNode:             idNode,
 		Logs:               make([]model.Instance, 0),
 		SizeLogs:           0,
-		Term:               0,
+		Term:               int64(term),
 		State:              state,
 		Network:            make([]raft_cluster_v1.ClusterNodeClient, 0),
 		LeadId:             leadId,
@@ -90,7 +90,7 @@ func (r *ClusterNodeServer) Serve(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	server := grpc.NewServer()
-	raft_cluster_v1.RegisterClusterNodeServer(server, &ClusterNodeServer{})
+	raft_cluster_v1.RegisterClusterNodeServer(server, r)
 
 	log.Debug("Node is running on port", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
 	go func() {
@@ -117,7 +117,6 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 		return &raft_cluster_v1.LogAccept{Term: r.Term}, errors.New("leader is not legitimate, not saved")
 	}
 
-	// if role is follower -> saving
 	commit := make(chan error, 1) // buffer chan for correct select construction
 	go func() {
 		// for possible routine leaks with ctx cancel
@@ -501,13 +500,11 @@ func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.Log
 					r.Network = slices.Delete(r.Network, id-1, id)
 					continue
 				} else {
-					// TODO: think about Election
 					if resp.Term > r.Term {
 						r.State = Follower
 					}
 					r.Logs = r.Logs[:len(r.Logs)-1]
-					// rollback our log form prev nodes.
-					// ... TODO:
+					// TODO: rollback our log form prev nodes.
 					return &raft_cluster_v1.Empty{}, err
 				}
 			}

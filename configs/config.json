@@ -1,0 +1,6 @@
+{
+    "host": "cluster_host",
+    "cluster_size": 3,
+    "quorum": 2,
+    "replication_factor": 2
+}

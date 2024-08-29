@@ -1,3 +1,12 @@
+/*
+This is a common implementation of the DRAFT protocol node for distributed fault-tolerant storage.
+Complies with the principles of the RAFT protocol:
+1. Log synchronization
+2. Replication and Commit
+3. Working with HeartBeat
+4. Thread Safety
+5. Node state management and election logic
+*/
 package node
 
 import (
@@ -13,27 +22,29 @@ import (
 	"github.com/google/uuid"
 )
 
-/*
-Как только кластер получает лидера, он может принимать новые записи журнала.
-Клиент может запросить лидера добавить новую запись журнала,
-которая представляет собой непрозрачный двоичный объект в Raft.
-Затем лидер записывает запись в долговременное хранилище и пытается реплицировать ее
-в кворум последователей. Как только запись журнала считается зафиксированной ,
-ее можно применить к конечному автомату.
-Конечный автомат зависит от приложения и реализуется с помощью интерфейса.
-*/
-
 // Global cluster settings
-const (
-	initClusterSize   = 3
-	quorum            = 2 // roundUp(initClusterSize)/2
-	replicationFactor = 2
+type ClusterSettings struct {
+	Host string `json:"cluster_host"`
+	Port string
 
-	// follower mutate to candidate after the HeartBeatTimeout expires
-	HeartBeatTimeout = time.Second * 3
-	// lead must send a heartbeats to followers every second
-	HeartBeatIntervalLeader = time.Second * 1
-)
+	Size              int `json:"cluster_size"`
+	Quorum            int `json:"quorum"` // roundUp(initClusterSize)/2
+	ReplicationFactor int `json:"replication_factor"`
+
+	HeartBeatTimeout        time.Duration // follower mutate to candidate after the HeartBeatTimeout expires
+	HeartBeatIntervalLeader time.Duration // lead must send a heartbeats to followers every second
+}
+
+// const (
+// 	initClusterSize   = 3
+// 	quorum            = 2
+// 	replicationFactor = 2
+
+//
+// 	HeartBeatTimeout = time.Second * 3
+//
+// 	HeartBeatIntervalLeader = time.Second * 1
+// )
 
 // Node current role in custer
 type StateType int
@@ -45,6 +56,8 @@ const (
 )
 
 type ClusterNodeServer struct {
+	Settings *ClusterSettings
+
 	IdNode   int
 	Logs     []model.Instance
 	SizeLogs int
@@ -61,7 +74,51 @@ type ClusterNodeServer struct {
 	raft_cluster_v1.UnimplementedClusterNodeServer
 }
 
-// Writing data to the node storage [Follower method]
+// constructor
+func New(idNode int, state StateType, leadId int, network []*ClusterNodeServer, sett *ClusterSettings) *ClusterNodeServer {
+	return &ClusterNodeServer{
+		Settings:           sett,
+		IdNode:             idNode,
+		Logs:               make([]model.Instance, 0), // Инициализация пустого слайса
+		SizeLogs:           0,
+		Term:               0,
+		State:              state,
+		Network:            network,
+		LeadId:             leadId,
+		timeLastHeartBreak: make(map[int]time.Time), // Инициализация пустой карты
+		mu:                 sync.RWMutex{},
+	}
+}
+
+// Start node server on random free port and fixed host form cfg
+func (r *ClusterNodeServer) Serve(stop <-chan struct{}) error {
+	// listen, err := net.Listen("tcp", config.Port)
+
+	// if err != nil {
+	// 	log.Fatalf("Failed to listen: %v", err)
+	// }
+
+	// server := grpc.NewServer()
+	// raft_cluster_v1.RegisterClusterNodeServer(server, &transmitter.ConnServer{})
+
+	// quit := make(chan os.Signal, 1)
+	// signal.Notify(quit, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT, syscall.SIGINT, syscall.SIGTSTP)
+
+	// log.Printf("Server is running on port %s", config.Port)
+	// go func() {
+	// 	if err := server.Serve(listen); err != nil {
+	// 		log.Fatalf("Failed to serve: %v", err)
+	// 	}
+	// }()
+	<-stop
+	// sercer.GracefulyStop()
+
+	return nil
+}
+
+func (r *ClusterNodeServer) Stop() {}
+
+// Writing data to the node storage
 func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.LogInfo) (*raft_cluster_v1.LogAccept, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -125,7 +182,7 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 	}
 }
 
-// Requesting vote from Candidate to Follower [Follower method]
+// Requesting vote from Candidate to Follower
 func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v1.RequestVoteRequest) (*raft_cluster_v1.RequestVoteResponse, error) {
 	commit := make(chan error, 1)
 	go func() {
@@ -233,11 +290,7 @@ func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster
 				r.Term = bulletin.Term
 				r.State = Follower
 				r.Logs = node.Logs // update
-				if node.State != Lead {
-					node.StartElection(ctx, &raft_cluster_v1.Empty{})
-				} else {
-					r.LeadId = node.IdNode
-				}
+				r.LeadId = node.IdNode
 				commit <- err
 				return
 			} else {
@@ -247,7 +300,7 @@ func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster
 
 		// checking qourum requirement
 		// ballotbox + candidate votes to yourself
-		if ballotbox+1 >= quorum {
+		if ballotbox+1 >= r.Settings.Quorum {
 			r.State = Lead
 			// send all nodes, that current node became a lead
 			for _, node := range r.Network {
@@ -315,18 +368,22 @@ func (r *ClusterNodeServer) SetLeader(ctx context.Context, req *raft_cluster_v1.
 // Lead
 func (r *ClusterNodeServer) SendHeartBeat(ctx context.Context, req *raft_cluster_v1.Empty) (*raft_cluster_v1.Empty, error) {
 	if r.State == Lead {
-		ticker := time.NewTicker(HeartBeatIntervalLeader)
+		ticker := time.NewTicker(r.Settings.HeartBeatIntervalLeader)
 		for {
 			select {
 			case <-ctx.Done():
 				return &raft_cluster_v1.Empty{}, context.Canceled
 			case <-ticker.C:
 				r.mu.RLock()
+				prevLogTerm := r.Term
+				if r.SizeLogs > 0 {
+					prevLogTerm = r.Logs[r.SizeLogs-1].Term
+				}
 				heartbeat := &raft_cluster_v1.HeartBeatRequest{
 					Term:         r.Term,
 					LeaderId:     int64(r.IdNode),
 					PrevLogIndex: int64(r.SizeLogs) - 1,
-					PrevLogTerm:  r.Logs[r.SizeLogs-1].Term,
+					PrevLogTerm:  prevLogTerm,
 				}
 				r.mu.RUnlock()
 
@@ -372,7 +429,9 @@ func (r *ClusterNodeServer) ReciveHeartBeat(ctx context.Context, req *raft_clust
 		r.mu.RLock()
 		defer r.mu.RUnlock()
 		// check relevance leader
-		if req.PrevLogTerm > r.Logs[r.SizeLogs-1].Term {
+		if r.SizeLogs == 0 {
+			commit <- nil
+		} else if req.PrevLogTerm > r.Logs[r.SizeLogs-1].Term {
 			commit <- nil
 		} else if req.PrevLogTerm < r.Logs[r.SizeLogs-1].Term {
 			commit <- errors.New("node's term last log greater, leader not legitimate")
@@ -431,7 +490,7 @@ func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.Log
 		// replication process
 		loaded := 1
 		for _, node := range r.Network {
-			if loaded == quorum {
+			if loaded == r.Settings.Quorum {
 				break
 			}
 			resp, err := node.LoadLog(ctx, log)
@@ -445,12 +504,14 @@ func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.Log
 						r.State = Follower
 					}
 					r.Logs = r.Logs[:len(r.Logs)-1]
+					// rollback our log form prev nodes.
+					// ... TODO:
 					return &raft_cluster_v1.Empty{}, err
 				}
 			}
 			loaded++
 		}
-		if loaded < quorum {
+		if loaded < r.Settings.Quorum {
 			return &raft_cluster_v1.Empty{}, errors.New("quorum not required")
 		} else {
 			return &raft_cluster_v1.Empty{}, nil

@@ -42,11 +42,11 @@ func TestStartElection_ContextDone(t *testing.T) {
 
 func TestStartElection_QuorumSatisfied(t *testing.T) {
 	// Создаем сеть узлов, где все узлы поддерживают голосование
-	node1 := newTestNode(1, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
-	node2 := newTestNode(2, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
-	node3 := newTestNode(3, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
-	node4 := newTestNode(4, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
-	node5 := newTestNode(5, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
+	node1 := newTestNode(0, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
+	node2 := newTestNode(1, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
+	node3 := newTestNode(2, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
+	node4 := newTestNode(3, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
+	node5 := newTestNode(4, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
 
 	// Сеть
 	node1.Network = []*node.ClusterNodeServer{node2, node3, node4, node5}
@@ -64,11 +64,11 @@ func TestStartElection_QuorumSatisfied(t *testing.T) {
 
 func TestStartElection_DisconnectElection(t *testing.T) {
 	// Создаем сеть узлов, где один узел не поддерживает голосование
-	node1 := newTestNode(1, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
-	node2 := newTestNode(2, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
-	node3 := newTestNode(3, node.Follower, 101, []model.Instance{newLogInstance(100, "log1")})
-	node4 := newTestNode(4, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
-	node5 := newTestNode(5, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
+	node1 := newTestNode(0, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
+	node2 := newTestNode(1, node.Follower, 101, []model.Instance{newLogInstance(100, "log1")})
+	node3 := newTestNode(2, node.Follower, 101, []model.Instance{newLogInstance(100, "log1")})
+	node4 := newTestNode(3, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
+	node5 := newTestNode(4, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
 
 	// Узел 3 отказывается голосовать
 	node3.State = node.Lead // Узел 3 уже лидер и не будет голосовать за выборы
@@ -88,7 +88,7 @@ func TestStartElection_DisconnectElection(t *testing.T) {
 }
 
 func TestStartElection_QuorumNotSatisfied(t *testing.T) {
-	node1 := newTestNode(1, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
+	node1 := newTestNode(0, node.Follower, 100, []model.Instance{newLogInstance(100, "log1")})
 
 	node1.Network = []*node.ClusterNodeServer{}
 

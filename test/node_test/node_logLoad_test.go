@@ -17,7 +17,7 @@ func TestLoadLogNotFollower(t *testing.T) {
 	node := &node.ClusterNodeServer{
 		IdNode:   1,
 		Term:     100,
-		State:    node.Lead,
+		State:    node.Candidate,
 		Logs:     make([]model.Instance, 0),
 		SizeLogs: 0,
 	}

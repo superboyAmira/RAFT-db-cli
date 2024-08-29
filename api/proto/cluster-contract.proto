@@ -12,6 +12,7 @@ service ClusterNode {
     // Lead
     rpc SendHeartBeat(Empty) returns (Empty);
     rpc Append(LogLeadRequest) returns (Empty);
+    rpc UpdateLogs(Empty) returns (SyncLog);
     
     // Candidate
     rpc StartElection(Empty) returns (ElectionDecision);
@@ -73,6 +74,11 @@ message HeartBeatRequest {
 
 message HeartBeatResponse {
     int64 term = 1;
+}
+
+message SyncLog {
+    int64 term = 1;
+    repeated LogInfo logs = 2; 
 }
 
 message Empty {

@@ -28,6 +28,7 @@ import (
 // Global cluster settings
 type ClusterSettings struct {
 	Host string `json:"cluster_host"`
+	Port string
 
 	Size              int `json:"cluster_size"`
 	Quorum            int `json:"quorum"` // roundUp(initClusterSize)/2
@@ -56,7 +57,7 @@ type ClusterNodeServer struct {
 	Term  int64
 	State StateType
 	// pointers to all nodes (poiteres, beacuse we are using mutex)
-	Network            []*ClusterNodeServer
+	Network            []raft_cluster_v1.ClusterNodeClient
 	LeadId             int
 	timeLastHeartBreak map[int]time.Time
 
@@ -74,7 +75,7 @@ func New(idNode int, state StateType, leadId int, sett *ClusterSettings) *Cluste
 		SizeLogs:           0,
 		Term:               0,
 		State:              state,
-		Network:            make([]*ClusterNodeServer, 0),
+		Network:            make([]raft_cluster_v1.ClusterNodeClient, 0),
 		LeadId:             leadId,
 		timeLastHeartBreak: make(map[int]time.Time),
 		mu:                 sync.RWMutex{},
@@ -83,12 +84,11 @@ func New(idNode int, state StateType, leadId int, sett *ClusterSettings) *Cluste
 
 // Start node server on random free port and fixed host form cfg
 func (r *ClusterNodeServer) Serve(ctx context.Context, log *slog.Logger) error {
-	listen, err := net.Listen("tcp", ":0") // random free prot on host
+	listen, err := net.Listen("tcp", r.Settings.Port) // random free prot on host
 	if err != nil {
 		log.Warn("Failed to listen", slog.Int("node_id", r.IdNode), slog.String("error", err.Error()))
 		return err
 	}
-
 	server := grpc.NewServer()
 	raft_cluster_v1.RegisterClusterNodeServer(server, &ClusterNodeServer{})
 
@@ -99,7 +99,7 @@ func (r *ClusterNodeServer) Serve(ctx context.Context, log *slog.Logger) error {
 		}
 	}()
 	<-ctx.Done()
-	log.Debug("Shurdown...", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
+	log.Debug("Shutdown...", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
 	server.GracefulStop()
 	log.Debug("Stopped Gracefully...", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
 	return nil
@@ -261,8 +261,8 @@ func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster
 		r.LeadId = -1
 
 		ballotbox := 0
-		for _, node := range r.Network {
-			bulletin, err := node.RequestVote(ctx, &raft_cluster_v1.RequestVoteRequest{
+		for id, network_client := range r.Network {
+			bulletin, err := network_client.RequestVote(ctx, &raft_cluster_v1.RequestVoteRequest{
 				Term:         r.Term,
 				LastLogTerm:  LastLogTerm,
 				LastLogIndex: int64(LastLogIndex),
@@ -276,8 +276,23 @@ func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster
 				// update our node data and state, if we are not legigimate
 				r.Term = bulletin.Term
 				r.State = Follower
-				r.Logs = node.Logs // update
-				r.LeadId = node.IdNode
+				// update
+				resp, err := network_client.UpdateLogs(ctx, &raft_cluster_v1.Empty{})
+				if err != nil {
+					commit <- err
+					return 
+				}
+				newLog := make([]model.Instance, 0)
+				for _, log := range resp.Logs {
+					UUID, _ := uuid.Parse(log.Id)
+					newLog = append(newLog, model.Instance{
+						Id: UUID,
+						Content: model.JsonData{ Name: log.JsonString },
+						Term: log.Term,
+					})
+				}
+				r.Logs = newLog 
+				r.LeadId = id
 				commit <- err
 				return
 			} else {
@@ -377,21 +392,21 @@ func (r *ClusterNodeServer) SendHeartBeat(ctx context.Context, req *raft_cluster
 				var wg sync.WaitGroup
 
 				legitimate := true
-				for _, follower := range r.Network {
+				for id, follower := range r.Network {
 					wg.Add(1)
-					go func(node *ClusterNodeServer) {
+					go func(client raft_cluster_v1.ClusterNodeClient, id int) {
 						defer wg.Done()
-						_, err := node.ReciveHeartBeat(ctx, heartbeat)
+						_, err := client.ReciveHeartBeat(ctx, heartbeat)
 						if err != nil {
 							r.mu.Lock()
 							if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-								r.Network = slices.Delete(r.Network, node.IdNode-1, node.IdNode)
+								r.Network = slices.Delete(r.Network, id-1, id)
 							} else {
 								legitimate = false
 							}
 							r.mu.Unlock()
 						}
-					}(follower)
+					}(follower, id)
 					if !legitimate {
 						r.mu.Lock()
 						r.State = Follower
@@ -447,7 +462,7 @@ func (r *ClusterNodeServer) ReciveHeartBeat(ctx context.Context, req *raft_clust
 			r.mu.Lock()
 			r.Term = req.Term
 			r.LeadId = int(req.LeaderId)
-			r.Logs = r.Network[r.LeadId].Logs
+			// r.Logs = r.Network[r.LeadId].Logs
 			r.mu.Unlock()
 			return &raft_cluster_v1.HeartBeatResponse{Term: r.Term}, nil
 		}
@@ -476,14 +491,14 @@ func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.Log
 
 		// replication process
 		loaded := 1
-		for _, node := range r.Network {
+		for id, node := range r.Network {
 			if loaded == r.Settings.Quorum {
 				break
 			}
 			resp, err := node.LoadLog(ctx, log)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-					r.Network = slices.Delete(r.Network, node.IdNode-1, node.IdNode)
+					r.Network = slices.Delete(r.Network, id-1, id)
 					continue
 				} else {
 					// TODO: think about Election
@@ -504,4 +519,27 @@ func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.Log
 			return &raft_cluster_v1.Empty{}, nil
 		}
 	}
+}
+
+func (r *ClusterNodeServer) UpdateLogs(ctx context.Context, req *raft_cluster_v1.Empty) (*raft_cluster_v1.SyncLog, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	logs := make([]*raft_cluster_v1.LogInfo, 0)
+	for i, log := range r.Logs {
+		logs = append(logs, &raft_cluster_v1.LogInfo{
+			Id: log.Id.String(),
+			Term: log.Term,
+			Index: int64(i),
+			JsonString: log.Content.Name,
+		})
+	}
+
+	return &raft_cluster_v1.SyncLog{
+		Term: r.Term,
+		Logs: logs,
+	}, nil 
 }

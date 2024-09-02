@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"warehouse/internal/model"
 	cluster_node "warehouse/internal/raft-cluster/node"
 	"warehouse/pkg/raft/raft_cluster_v1"
 
@@ -37,7 +38,7 @@ func (r *Manager) StartCluster() error {
 	if len(r.cluster) > 0 {
 		return errors.New("alredy running")
 	}
-	cluster_node.Log.Debug("Starting cluster...")
+	cluster_node.Log.Info("Starting cluster...")
 
 	settings, err := loadCfg()
 	if err != nil {
@@ -53,7 +54,6 @@ func (r *Manager) StartCluster() error {
 	r.ctx, r.stopCluster = context.WithCancel(context.Background())
 	countActive := 0
 
-	// we have 2 fields state and initTerm for lead primary settings, without primary election
 	for i := 0; i < settings.Size; i++ {
 		port, err := getFreePort()
 		if err != nil {
@@ -100,17 +100,19 @@ func (r *Manager) StartCluster() error {
 		
     }
 
-	// create client for operations with cluster per Leader
-	// conn, err := grpc.NewClient("localhost"+r.cluster[r.leadId].Settings.Port,
-	// grpc.WithTransportCredentials(insecure.NewCredentials()))
-	// if err != nil {
-	// 	cluster_node.Log.Warn("Failed to create gRPC client",  slog.Int("node_id", r.leadId), slog.String("error", err.Error()))
-	// 	r.GracefullyStop()
-	// }
-	// r.globalClient = raft_cluster_v1.NewClusterNodeClient(conn)
+	// create client for operations with cluster node 0.
+	// In CRUD operations we provided for redirect a request to current lead node
+	conn, err := grpc.NewClient("localhost"+r.cluster[0].Settings.Port,
+	grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		cluster_node.Log.Warn("Failed to create gRPC client",  slog.Int("node_id", r.leadId), slog.String("error", err.Error()))
+		r.GracefullyStop()
+	}
+	r.globalClient = raft_cluster_v1.NewClusterNodeClient(conn)
 
-	cluster_node.Log.Debug("Cluster started")
+	cluster_node.Log.Info("Cluster started")
 
+	time.Sleep(5*time.Millisecond)
 	return nil
 }
 
@@ -118,6 +120,10 @@ func (r *Manager) GracefullyStop() {
 	r.stopCluster()
 	r.wg.Wait()
 }
+
+/*
+----------------CRUD-------------------
+*/
 
 func (r *Manager) SetLog(uuid, jsonString string) (error) {
 	if len(r.cluster) == 0 {
@@ -131,6 +137,14 @@ func (r *Manager) SetLog(uuid, jsonString string) (error) {
 	_, err := r.globalClient.Append(r.ctx, req)
 	return err
 }
+
+// func (r *Manager) GetLogs() []model.Instance {
+// 	_, err = r.cluster[0].Ge
+// } 
+
+/*
+----------------Support-------------------
+*/
 
 func loadCfg() (*cluster_node.ClusterSettings, error) {
 	file, err := os.Open(cfgPath)
@@ -146,9 +160,9 @@ func loadCfg() (*cluster_node.ClusterSettings, error) {
 	if err != nil {
 		return nil, err
 	}
-	config.HeartBeatIntervalLeader = 1 * time.Second
-	config.HeartBeatTimeout = 3 * time.Second
-	config.ElectionTimeout = 2 * time.Second
+	config.HeartBeatIntervalLeader = 1 * time.Millisecond
+	config.HeartBeatTimeout = 3 * time.Millisecond
+	config.ElectionTimeout = 2 * time.Millisecond
 	return config, nil
 }
 

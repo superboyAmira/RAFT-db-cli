@@ -11,8 +11,8 @@ package node
 
 import (
 	"context"
-	"math/rand"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -41,7 +41,7 @@ type ClusterSettings struct {
 	ElectionTimeout         time.Duration
 }
 
-var Log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+var Log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 // Node current role in custer
 type StateType int
@@ -101,7 +101,7 @@ func (r *ClusterNodeServer) Serve(ctx context.Context) error {
 	server := grpc.NewServer()
 	raft_cluster_v1.RegisterClusterNodeServer(server, r)
 
-	Log.Debug("Node is running on port", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
+	Log.Info("Node is running on port", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
 
 	// start server
 	go func() {
@@ -110,15 +110,15 @@ func (r *ClusterNodeServer) Serve(ctx context.Context) error {
 		}
 	}()
 
-	time.Sleep(r.Settings.ElectionTimeout*2)
+	time.Sleep(r.Settings.ElectionTimeout*5)
 	// r.NewElectionTimer(ctx)
 	// r.ResetElectionTimer(ctx)
 	r.BecameFollower(ctx)
 	<-ctx.Done()
-	Log.Info("INFO", slog.Int("node_id", r.IdNode), slog.Int("leadID", r.LeadId), slog.String("address", listen.Addr().String()))
-	Log.Debug("Shutdown...", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
+	Log.Info("Death note about node", slog.Int("node_id", r.IdNode), slog.Int("leadID", r.LeadId), slog.String("address", listen.Addr().String()))
+	Log.Info("Shutdown...", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
 	server.GracefulStop()
-	Log.Debug("Stopped Gracefully...", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
+	Log.Info("Stopped Gracefully...", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
 	return nil
 }
 
@@ -163,7 +163,7 @@ func (r *ClusterNodeServer) BecameCandidate(ctx context.Context) {
 	Log.Debug("Became Candidate", slog.Int("node_id", r.IdNode), slog.String("address", r.Settings.Port))
 	r.mu.Lock()
 	// if !r.electionTimer.Stop() {
-		// <-r.electionTimer.C
+	// <-r.electionTimer.C
 	// }
 	r.State = Candidate
 	r.mu.Unlock()
@@ -180,55 +180,6 @@ func (r *ClusterNodeServer) BecameCandidate(ctx context.Context) {
 ----------------Heartbeat-------------------
 */
 
-// func (r *ClusterNodeServer) NewElectionTimer(ctx context.Context) {
-// 	r.mu.Lock()
-// 	r.electionTimer = time.NewTimer(r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)
-// 	r.mu.Unlock()
-// 	Log.Debug("EL Timer started", slog.String("port", r.Settings.Port), slog.Duration("dur", (r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)))
-// 	go func() {
-// 		select {
-// 		case <-ctx.Done():
-// 			return
-// 		case time:=<-r.electionTimer.C:
-// 			if r.State != Follower {
-// 				r.mu.Lock()
-// 				if !r.electionTimer.Stop() {
-// 					<-r.electionTimer.C
-// 				}
-// 				r.mu.Unlock()
-// 				Log.Debug("LEAD EL deleted", slog.String("port", r.Settings.Port))
-// 			} else {
-// 				Log.Debug("TO CANDIDATE!!!!!!!!!", slog.String("port", r.Settings.Port), slog.Int("time", time.Second()))
-// 				r.BecameCandidate(ctx)
-// 			}
-// 		}
-// 	}()
-// }
-
-// func (r *ClusterNodeServer) ResetElectionTimer(ctx context.Context) {
-// 	if r.State != Follower {
-// 		r.mu.Lock()
-// 		if !r.electionTimer.Stop() {
-// 			<-r.electionTimer.C
-// 		}
-// 		r.mu.Unlock()
-// 		Log.Debug("LEAD EL deleted", slog.String("port", r.Settings.Port))
-// 		return
-// 	}
-// 	select {
-// 	case <-ctx.Done():
-// 		return
-// 	default:
-// 	}
-// 	r.mu.Lock()
-// 	if !r.electionTimer.Stop() {
-//         <-r.electionTimer.C
-// 	}
-//     r.electionTimer.Reset(r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)
-// 	r.mu.Unlock()
-// 	Log.Debug("EL RESET", slog.Duration("dur", (r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)), slog.String("port", r.Settings.Port))
-// }
-
 func (r *ClusterNodeServer) ResetElectionTimer(ctx context.Context) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -241,7 +192,7 @@ func (r *ClusterNodeServer) ResetElectionTimer(ctx context.Context) {
 			}
 		}
 	}
-	duration := time.Duration(rand.Intn(5)+5) * time.Second
+	duration := time.Duration(r.Settings.HeartBeatTimeout+time.Millisecond*time.Duration(r.IdNode))
 	r.electionTimer = time.AfterFunc(duration, func() {
 		r.BecameCandidate(ctx)
 	})
@@ -379,7 +330,7 @@ func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster
 	r.Term++
 	r.LeadId = -1
 	r.mu.Unlock()
-	
+
 	r.mu.RLock()
 	LastLogTerm := r.Term
 	LastLogIndex := 0
@@ -503,7 +454,7 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 		if req.LastLogTerm > r.Logs[r.SizeLogs-1].Term {
 			// term more than our -> relevated, vote yes
 			return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, nil
-		} else if req.LastLogTerm < r.Logs[r.SizeLogs-1].Term { 
+		} else if req.LastLogTerm < r.Logs[r.SizeLogs-1].Term {
 			return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, errors.New("voter's term last log greater, candidate not legitimate")
 
 		} else {
@@ -526,8 +477,7 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 
 // Writing data to the node storage
 func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.LogInfo) (*raft_cluster_v1.LogAccept, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
 	// check node role
 	if r.State == Candidate {
 		return &raft_cluster_v1.LogAccept{Term: r.Term}, errors.New("forbidden, not saved")
@@ -535,6 +485,7 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 	if r.Term > req.Term {
 		return &raft_cluster_v1.LogAccept{Term: r.Term}, errors.New("leader is not legitimate, not saved")
 	}
+	r.mu.RUnlock()
 
 	commit := make(chan error, 1) // buffer chan for correct select construction
 	go func() {
@@ -558,11 +509,13 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 			}
 		}()
 
+		r.mu.Lock()
 		r.Logs = slices.Insert(r.Logs, int(req.Index), model.Instance{
 			Id:      uuid.New(),
 			Content: model.JsonData{Name: req.JsonString},
 			Term:    req.Term,
 		})
+		r.mu.Unlock()
 		commit <- nil
 	}()
 
@@ -580,6 +533,9 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 		if err != nil {
 			return &raft_cluster_v1.LogAccept{Term: r.Term}, err
 		} else {
+			
+			Log.Info("Load log to Follower", slog.Int("nodeID", r.IdNode), /*slog.String("log", r.Logs[r.SizeLogs-1].Content.Name)*/)
+			fmt.Println(r.Logs)
 			r.Term = req.Term
 			r.SizeLogs = len(r.Logs)
 			return &raft_cluster_v1.LogAccept{Term: r.Term}, nil
@@ -590,6 +546,7 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 // Load log to Cluster. This is an abstract method for changing data in the entire cluster.
 func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.LogLeadRequest) (*raft_cluster_v1.Empty, error) {
 	if r.State != Lead {
+		Log.Info("Redirect to LEADNODE", slog.Int("LeadID", r.LeadId))
 		_, err := r.Network[r.LeadId].Append(ctx, req)
 		return &raft_cluster_v1.Empty{}, err
 	}
@@ -603,6 +560,9 @@ func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.Log
 		JsonString: req.JsonString,
 	}
 	_, err := r.LoadLog(ctx, log)
+	
+	Log.Info("Load log to Lead", slog.Int("nodeID", r.IdNode), slog.String("log", r.Logs[r.SizeLogs-1].Content.Name))
+	fmt.Println(r.Logs)
 	if err != nil {
 		return &raft_cluster_v1.Empty{}, err
 	}
@@ -630,6 +590,7 @@ func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.Log
 		loaded++
 	}
 	if loaded < r.Settings.Quorum {
+		// TODO: Delete log if not required
 		return &raft_cluster_v1.Empty{}, errors.New("quorum not required")
 	} else {
 		return &raft_cluster_v1.Empty{}, nil

@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 	"warehouse/internal/raft-cluster/manager"
+
+	"github.com/google/uuid"
 )
 
 func TestBasicStartCluster(t *testing.T) {
@@ -23,11 +25,12 @@ func TestLoadLog(t *testing.T) {
 	if err != nil {
 		t.Error(err.Error())
 	}
-	time.Sleep(29 * time.Second)
-	// err = man.SetLog(uuid.NewString(), "{\"name\": \"Chapayev Mustache comb\"}")
-	// if err != nil {
-	// 	t.Error(err.Error())
-	// }
+	
+	err = man.SetLog(uuid.NewString(), "{\"name\": \"Chapayev Mustache comb\"}")
+	if err != nil {
+		t.Error(err.Error())
+	}
+	time.Sleep(3 * time.Second)
 
 	man.GracefullyStop()
 }

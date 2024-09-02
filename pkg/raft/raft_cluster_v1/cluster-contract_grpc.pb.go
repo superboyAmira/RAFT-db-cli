@@ -22,7 +22,6 @@ const (
 	ClusterNode_LoadLog_FullMethodName         = "/raft_v1.ClusterNode/LoadLog"
 	ClusterNode_SetLeader_FullMethodName       = "/raft_v1.ClusterNode/SetLeader"
 	ClusterNode_ReciveHeartBeat_FullMethodName = "/raft_v1.ClusterNode/ReciveHeartBeat"
-	ClusterNode_SendHeartBeat_FullMethodName   = "/raft_v1.ClusterNode/SendHeartBeat"
 	ClusterNode_Append_FullMethodName          = "/raft_v1.ClusterNode/Append"
 	ClusterNode_UpdateLogs_FullMethodName      = "/raft_v1.ClusterNode/UpdateLogs"
 	ClusterNode_StartElection_FullMethodName   = "/raft_v1.ClusterNode/StartElection"
@@ -38,7 +37,6 @@ type ClusterNodeClient interface {
 	SetLeader(ctx context.Context, in *LeadInfo, opts ...grpc.CallOption) (*LeadAccept, error)
 	ReciveHeartBeat(ctx context.Context, in *HeartBeatRequest, opts ...grpc.CallOption) (*HeartBeatResponse, error)
 	// Lead
-	SendHeartBeat(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
 	Append(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error)
 	UpdateLogs(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*SyncLog, error)
 	// Candidate
@@ -78,16 +76,6 @@ func (c *clusterNodeClient) ReciveHeartBeat(ctx context.Context, in *HeartBeatRe
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HeartBeatResponse)
 	err := c.cc.Invoke(ctx, ClusterNode_ReciveHeartBeat_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *clusterNodeClient) SendHeartBeat(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Empty)
-	err := c.cc.Invoke(ctx, ClusterNode_SendHeartBeat_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +131,6 @@ type ClusterNodeServer interface {
 	SetLeader(context.Context, *LeadInfo) (*LeadAccept, error)
 	ReciveHeartBeat(context.Context, *HeartBeatRequest) (*HeartBeatResponse, error)
 	// Lead
-	SendHeartBeat(context.Context, *Empty) (*Empty, error)
 	Append(context.Context, *LogLeadRequest) (*Empty, error)
 	UpdateLogs(context.Context, *Empty) (*SyncLog, error)
 	// Candidate
@@ -167,9 +154,6 @@ func (UnimplementedClusterNodeServer) SetLeader(context.Context, *LeadInfo) (*Le
 }
 func (UnimplementedClusterNodeServer) ReciveHeartBeat(context.Context, *HeartBeatRequest) (*HeartBeatResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReciveHeartBeat not implemented")
-}
-func (UnimplementedClusterNodeServer) SendHeartBeat(context.Context, *Empty) (*Empty, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SendHeartBeat not implemented")
 }
 func (UnimplementedClusterNodeServer) Append(context.Context, *LogLeadRequest) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Append not implemented")
@@ -254,24 +238,6 @@ func _ClusterNode_ReciveHeartBeat_Handler(srv interface{}, ctx context.Context, 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ClusterNodeServer).ReciveHeartBeat(ctx, req.(*HeartBeatRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _ClusterNode_SendHeartBeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ClusterNodeServer).SendHeartBeat(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ClusterNode_SendHeartBeat_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ClusterNodeServer).SendHeartBeat(ctx, req.(*Empty))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -366,10 +332,6 @@ var ClusterNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReciveHeartBeat",
 			Handler:    _ClusterNode_ReciveHeartBeat_Handler,
-		},
-		{
-			MethodName: "SendHeartBeat",
-			Handler:    _ClusterNode_SendHeartBeat_Handler,
 		},
 		{
 			MethodName: "Append",

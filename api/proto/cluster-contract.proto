@@ -10,7 +10,6 @@ service ClusterNode {
     rpc ReciveHeartBeat(HeartBeatRequest) returns (HeartBeatResponse);
     
     // Lead
-    rpc SendHeartBeat(Empty) returns (Empty);
     rpc Append(LogLeadRequest) returns (Empty);
     rpc UpdateLogs(Empty) returns (SyncLog);
     

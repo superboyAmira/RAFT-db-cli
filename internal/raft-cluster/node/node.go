@@ -11,6 +11,7 @@ package node
 
 import (
 	"context"
+	"math/rand"
 	"errors"
 	"log/slog"
 	"net"
@@ -63,7 +64,7 @@ type ClusterNodeServer struct {
 
 	Network       []raft_cluster_v1.ClusterNodeClient
 	LeadId        int
-	electionTimer time.Timer
+	electionTimer *time.Timer
 
 	mu sync.RWMutex
 
@@ -92,7 +93,7 @@ func New(idNode int, state StateType, leadId int, term int, sett *ClusterSetting
 
 // Start node server on random free port and fixed host form cfg
 func (r *ClusterNodeServer) Serve(ctx context.Context) error {
-	listen, err := net.Listen("tcp", r.Settings.Port) // random free prot on host
+	listen, err := net.Listen("tcp", r.Settings.Port)
 	if err != nil {
 		Log.Warn("Failed to listen", slog.Int("node_id", r.IdNode), slog.String("error", err.Error()))
 		return err
@@ -109,8 +110,9 @@ func (r *ClusterNodeServer) Serve(ctx context.Context) error {
 		}
 	}()
 
-	time.Sleep(r.Settings.ElectionTimeout)
-	r.NewElectionTimer(ctx)
+	time.Sleep(r.Settings.ElectionTimeout*2)
+	// r.NewElectionTimer(ctx)
+	// r.ResetElectionTimer(ctx)
 	r.BecameFollower(ctx)
 	<-ctx.Done()
 	Log.Info("INFO", slog.Int("node_id", r.IdNode), slog.Int("leadID", r.LeadId), slog.String("address", listen.Addr().String()))
@@ -160,7 +162,9 @@ func (r *ClusterNodeServer) BecameCandidate(ctx context.Context) {
 	}
 	Log.Debug("Became Candidate", slog.Int("node_id", r.IdNode), slog.String("address", r.Settings.Port))
 	r.mu.Lock()
-	r.electionTimer.Stop()
+	// if !r.electionTimer.Stop() {
+		// <-r.electionTimer.C
+	// }
 	r.State = Candidate
 	r.mu.Unlock()
 	_, err := r.StartElection(ctx, &raft_cluster_v1.Empty{})
@@ -176,45 +180,73 @@ func (r *ClusterNodeServer) BecameCandidate(ctx context.Context) {
 ----------------Heartbeat-------------------
 */
 
-func (r *ClusterNodeServer) NewElectionTimer(ctx context.Context) {
-	r.electionTimer = *time.NewTimer(r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)
-	Log.Debug("EL Timer started", slog.String("port", r.Settings.Port), slog.Duration("dur", (r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)))
-	go func(ctx context.Context) {
-		select {
-		case <-ctx.Done():
-			return
-		case time:=<-r.electionTimer.C:
-			if r.State != Follower {
-				if !r.electionTimer.Stop() {
-					<-r.electionTimer.C
-				}
-				Log.Debug("LEAD EL deleted", slog.String("port", r.Settings.Port))
-			} else {
-				Log.Debug("TO CANDIDATE!!!!!!!!!", slog.String("port", r.Settings.Port), slog.Int("time", time.Second()))
-				r.BecameCandidate(ctx)
-			}
-		}
-	}(ctx)
-}
+// func (r *ClusterNodeServer) NewElectionTimer(ctx context.Context) {
+// 	r.mu.Lock()
+// 	r.electionTimer = time.NewTimer(r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)
+// 	r.mu.Unlock()
+// 	Log.Debug("EL Timer started", slog.String("port", r.Settings.Port), slog.Duration("dur", (r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)))
+// 	go func() {
+// 		select {
+// 		case <-ctx.Done():
+// 			return
+// 		case time:=<-r.electionTimer.C:
+// 			if r.State != Follower {
+// 				r.mu.Lock()
+// 				if !r.electionTimer.Stop() {
+// 					<-r.electionTimer.C
+// 				}
+// 				r.mu.Unlock()
+// 				Log.Debug("LEAD EL deleted", slog.String("port", r.Settings.Port))
+// 			} else {
+// 				Log.Debug("TO CANDIDATE!!!!!!!!!", slog.String("port", r.Settings.Port), slog.Int("time", time.Second()))
+// 				r.BecameCandidate(ctx)
+// 			}
+// 		}
+// 	}()
+// }
+
+// func (r *ClusterNodeServer) ResetElectionTimer(ctx context.Context) {
+// 	if r.State != Follower {
+// 		r.mu.Lock()
+// 		if !r.electionTimer.Stop() {
+// 			<-r.electionTimer.C
+// 		}
+// 		r.mu.Unlock()
+// 		Log.Debug("LEAD EL deleted", slog.String("port", r.Settings.Port))
+// 		return
+// 	}
+// 	select {
+// 	case <-ctx.Done():
+// 		return
+// 	default:
+// 	}
+// 	r.mu.Lock()
+// 	if !r.electionTimer.Stop() {
+//         <-r.electionTimer.C
+// 	}
+//     r.electionTimer.Reset(r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)
+// 	r.mu.Unlock()
+// 	Log.Debug("EL RESET", slog.Duration("dur", (r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)), slog.String("port", r.Settings.Port))
+// }
 
 func (r *ClusterNodeServer) ResetElectionTimer(ctx context.Context) {
-	if r.State != Follower {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.electionTimer != nil {
 		if !r.electionTimer.Stop() {
-			<-r.electionTimer.C
+			select {
+			case <-r.electionTimer.C:
+			default:
+			}
 		}
-		Log.Debug("LEAD EL deleted", slog.String("port", r.Settings.Port))
-		return
 	}
-	select {
-	case <-ctx.Done():
-		return
-	default:
-	}
-	if !r.electionTimer.Stop() {
-        <-r.electionTimer.C
-    }
-    r.electionTimer.Reset(r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)
-	Log.Debug("EL RESET", slog.Duration("dur", (r.Settings.HeartBeatTimeout + time.Duration(r.IdNode)*time.Second)), slog.String("port", r.Settings.Port))
+	duration := time.Duration(rand.Intn(5)+5) * time.Second
+	r.electionTimer = time.AfterFunc(duration, func() {
+		r.BecameCandidate(ctx)
+	})
+
+	Log.Debug("EL RESET", "dur", duration, "port", r.Settings.Port)
 }
 
 func (r *ClusterNodeServer) HeartBeatTicker(ctx context.Context) {
@@ -225,7 +257,7 @@ func (r *ClusterNodeServer) HeartBeatTicker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			r.mu.RLock()
+			// r.mu.RLock()
 			prevLogTerm := r.Term
 			if r.SizeLogs > 0 {
 				prevLogTerm = r.Logs[r.SizeLogs-1].Term
@@ -236,7 +268,7 @@ func (r *ClusterNodeServer) HeartBeatTicker(ctx context.Context) {
 				PrevLogIndex: int64(r.SizeLogs) - 1,
 				PrevLogTerm:  prevLogTerm,
 			}
-			r.mu.RUnlock()
+			// r.mu.RUnlock()
 
 			var wg sync.WaitGroup
 
@@ -274,12 +306,11 @@ func (r *ClusterNodeServer) ReciveHeartBeat(ctx context.Context, req *raft_clust
 	case <-ctx.Done():
 		return &raft_cluster_v1.HeartBeatResponse{Term: r.Term}, context.Canceled
 	default:
-		r.mu.Lock()
 		if r.State == Lead || r.State == Candidate {
 			r.BecameFollower(ctx)
 		}
-		// update our timeout
 		r.ResetElectionTimer(ctx)
+		r.mu.Lock()
 		r.Term = req.Term
 		r.LeadId = int(req.LeaderId)
 		// update
@@ -299,6 +330,7 @@ func (r *ClusterNodeServer) ReciveHeartBeat(ctx context.Context, req *raft_clust
 		// }
 		// r.Logs = newLog
 		r.mu.Unlock()
+		// update our timeout
 		Log.Debug("HB Recieved form ", slog.String("port", r.Settings.Port), slog.Int("sender", int(req.LeaderId)))
 		return &raft_cluster_v1.HeartBeatResponse{Term: r.Term}, nil
 	}
@@ -343,16 +375,19 @@ func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	// we update r.Term with new election
 	r.Term++
+	r.LeadId = -1
+	r.mu.Unlock()
+	
+	r.mu.RLock()
 	LastLogTerm := r.Term
 	LastLogIndex := 0
 	if r.SizeLogs > 0 {
 		LastLogTerm = r.Logs[r.SizeLogs-1].Term
 		LastLogIndex = r.SizeLogs - 1
 	}
-	r.LeadId = -1
+	r.mu.RUnlock()
 
 	ballotbox := 0
 	for id, network_client := range r.Network {
@@ -419,6 +454,7 @@ func (r *ClusterNodeServer) SetLeader(ctx context.Context, req *raft_cluster_v1.
 			Term: r.Term,
 		}, errors.New("lead isn't legitimate")
 	}
+	r.ResetElectionTimer(ctx)
 
 	commit := make(chan error, 1)
 	go func() {
@@ -435,7 +471,6 @@ func (r *ClusterNodeServer) SetLeader(ctx context.Context, req *raft_cluster_v1.
 	case <-ctx.Done():
 		return &raft_cluster_v1.LeadAccept{Term: r.Term}, context.Canceled
 	case err := <-commit:
-		r.ResetElectionTimer(ctx)
 		Log.Debug("Lead set", slog.String("port", r.Settings.Port), slog.Int("leadID", int(req.IdLeader)))
 		return &raft_cluster_v1.LeadAccept{Term: r.Term}, err
 	}
@@ -449,11 +484,10 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 	default:
 	}
 
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	r.ResetElectionTimer(ctx)
 
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if r.Term < req.Term {
 		if r.State == Lead || r.State == Candidate {
 			r.State = Follower

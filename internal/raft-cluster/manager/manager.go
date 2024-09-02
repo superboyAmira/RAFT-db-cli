@@ -97,6 +97,7 @@ func (r *Manager) StartCluster() error {
                 node.Network = append(node.Network, client)
             }
         }
+		
     }
 
 	// create client for operations with cluster per Leader

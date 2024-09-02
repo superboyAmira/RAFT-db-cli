@@ -23,7 +23,7 @@ func TestLoadLog(t *testing.T) {
 	if err != nil {
 		t.Error(err.Error())
 	}
-	time.Sleep(25 * time.Second)
+	time.Sleep(29 * time.Second)
 	// err = man.SetLog(uuid.NewString(), "{\"name\": \"Chapayev Mustache comb\"}")
 	// if err != nil {
 	// 	t.Error(err.Error())

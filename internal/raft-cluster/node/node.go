@@ -18,6 +18,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"warehouse/internal/model"
@@ -66,7 +67,9 @@ type ClusterNodeServer struct {
 	LeadId        int
 	electionTimer *time.Timer
 
-	mu sync.RWMutex
+	mu      sync.RWMutex
+	nodeCtx context.Context
+	nodeCancel context.CancelFunc
 
 	raft_cluster_v1.UnimplementedClusterNodeServer
 }
@@ -93,6 +96,11 @@ func New(idNode int, state StateType, leadId int, term int, sett *ClusterSetting
 
 // Start node server on random free port and fixed host form cfg
 func (r *ClusterNodeServer) Serve(ctx context.Context) error {
+	// copy to local context
+	// this useful to untie the execution of a node from the context of the entire cluster.
+	// When using a shared cluster, when they fail, the context of the entire cluster will be canceled.
+	r.nodeCtx, r.nodeCancel = context.WithCancel(ctx) 
+
 	listen, err := net.Listen("tcp", r.Settings.Port)
 	if err != nil {
 		Log.Warn("Failed to listen", slog.Int("node_id", r.IdNode), slog.String("error", err.Error()))
@@ -111,11 +119,15 @@ func (r *ClusterNodeServer) Serve(ctx context.Context) error {
 	}()
 
 	time.Sleep(r.Settings.ElectionTimeout*5)
-	// r.NewElectionTimer(ctx)
-	// r.ResetElectionTimer(ctx)
-	r.BecameFollower(ctx)
-	<-ctx.Done()
-	Log.Info("Death note about node", slog.Int("node_id", r.IdNode), slog.Int("leadID", r.LeadId), slog.String("address", listen.Addr().String()))
+
+	r.BecameFollower(r.nodeCtx)
+	// waiting cancel() from parent context in manager
+	<-r.nodeCtx.Done()
+	if r.SizeLogs > 0 {
+		Log.Info("Death note about node", slog.Int("node_id", r.IdNode), slog.Int("leadID", r.LeadId), slog.Int("term", int(r.Term)), slog.String("last_content", r.Logs[r.SizeLogs-1].Content.Name))
+	} else {
+		Log.Info("Death note about node", slog.Int("node_id", r.IdNode), slog.Int("leadID", r.LeadId), slog.Int("term", int(r.Term)), slog.String("address", listen.Addr().String()))
+	}
 	Log.Info("Shutdown...", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
 	server.GracefulStop()
 	Log.Info("Stopped Gracefully...", slog.Int("node_id", r.IdNode), slog.String("address", listen.Addr().String()))
@@ -137,7 +149,7 @@ func (r *ClusterNodeServer) BecameLead(ctx context.Context) {
 	r.State = Lead
 	r.LeadId = r.IdNode
 	r.mu.Unlock()
-	go r.HeartBeatTicker(ctx)
+	go r.HeartBeatTicker(r.nodeCtx)
 }
 
 func (r *ClusterNodeServer) BecameFollower(ctx context.Context) {
@@ -151,13 +163,13 @@ func (r *ClusterNodeServer) BecameFollower(ctx context.Context) {
 	r.State = Follower
 	// for follower to lead mutation
 	r.mu.Unlock()
-	r.ResetElectionTimer(ctx)
+	r.ResetElectionTimer(r.nodeCtx)
 }
 
-func (r *ClusterNodeServer) BecameCandidate(ctx context.Context) {
+func (r *ClusterNodeServer) BecameCandidate(ctx context.Context) error {
 	select {
 	case <-ctx.Done():
-		return
+		return ctx.Err()
 	default:
 	}
 	Log.Debug("Became Candidate", slog.Int("node_id", r.IdNode), slog.String("address", r.Settings.Port))
@@ -167,13 +179,14 @@ func (r *ClusterNodeServer) BecameCandidate(ctx context.Context) {
 	// }
 	r.State = Candidate
 	r.mu.Unlock()
-	_, err := r.StartElection(ctx, &raft_cluster_v1.Empty{})
+	_, err := r.StartElection(r.nodeCtx, &raft_cluster_v1.Empty{})
 	if err != nil {
 		Log.Debug("Election result", slog.String("port", r.Settings.Port), slog.String("err", err.Error()))
-		r.BecameFollower(ctx)
-		return
+		r.BecameFollower(r.nodeCtx)
+		return nil
 	}
-	r.BecameLead(ctx)
+	r.BecameLead(r.nodeCtx)
+	return nil
 }
 
 /*
@@ -192,9 +205,17 @@ func (r *ClusterNodeServer) ResetElectionTimer(ctx context.Context) {
 			}
 		}
 	}
-	duration := time.Duration(r.Settings.HeartBeatTimeout+time.Millisecond*time.Duration(r.IdNode))
+
+	// this magic number '4' needed in order to eliminate parallel elections between two nodes
+	duration := time.Duration(r.Settings.HeartBeatTimeout + time.Millisecond*time.Duration(r.IdNode)*4)
 	r.electionTimer = time.AfterFunc(duration, func() {
-		r.BecameCandidate(ctx)
+		select {
+		case <-ctx.Done():
+			Log.Error("Election timer cancelled due to context cancellation")
+			return
+		default:
+			r.BecameCandidate(r.nodeCtx)
+		}
 	})
 
 	Log.Debug("EL RESET", "dur", duration, "port", r.Settings.Port)
@@ -206,6 +227,7 @@ func (r *ClusterNodeServer) HeartBeatTicker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			Log.Debug("Lead Disconnected!")
 			return
 		case <-ticker.C:
 			// r.mu.RLock()
@@ -228,7 +250,7 @@ func (r *ClusterNodeServer) HeartBeatTicker(ctx context.Context) {
 				wg.Add(1)
 				go func(client raft_cluster_v1.ClusterNodeClient, id int) {
 					defer wg.Done()
-					_, err := client.ReciveHeartBeat(ctx, heartbeat)
+					_, err := client.ReciveHeartBeat(r.nodeCtx, heartbeat)
 					if err != nil {
 						r.mu.Lock()
 						if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
@@ -241,7 +263,7 @@ func (r *ClusterNodeServer) HeartBeatTicker(ctx context.Context) {
 				}(follower, id)
 				if !legitimate {
 					wg.Wait()
-					r.BecameFollower(ctx)
+					r.BecameFollower(r.nodeCtx)
 					Log.Debug("Lead Ticker err ended", slog.String("port", r.Settings.Port))
 					return
 				}
@@ -258,31 +280,14 @@ func (r *ClusterNodeServer) ReciveHeartBeat(ctx context.Context, req *raft_clust
 		return &raft_cluster_v1.HeartBeatResponse{Term: r.Term}, context.Canceled
 	default:
 		if r.State == Lead || r.State == Candidate {
-			r.BecameFollower(ctx)
+			r.BecameFollower(r.nodeCtx)
 		}
-		r.ResetElectionTimer(ctx)
+		r.ResetElectionTimer(r.nodeCtx)
 		r.mu.Lock()
 		r.Term = req.Term
 		r.LeadId = int(req.LeaderId)
-		// update
-		// resp, err := r.Network[r.LeadId].UpdateLogs(ctx, &raft_cluster_v1.Empty{})
-		// if err != nil {
-		// 	r.BecameCandidate(ctx)
-		// 	return &raft_cluster_v1.HeartBeatResponse{Term: r.Term}, err
-		// }
-		// newLog := make([]model.Instance, 0)
-		// for _, log := range resp.Logs {
-		// 	UUID, _ := uuid.Parse(log.Id)
-		// 	newLog = append(newLog, model.Instance{
-		// 		Id:      UUID,
-		// 		Content: model.JsonData{Name: log.JsonString},
-		// 		Term:    log.Term,
-		// 	})
-		// }
-		// r.Logs = newLog
 		r.mu.Unlock()
-		// update our timeout
-		Log.Debug("HB Recieved form ", slog.String("port", r.Settings.Port), slog.Int("sender", int(req.LeaderId)))
+		Log.Debug("HB Recieved form ", slog.Int("nodeID", r.IdNode), slog.Int("senderID", int(req.LeaderId)))
 		return &raft_cluster_v1.HeartBeatResponse{Term: r.Term}, nil
 	}
 }
@@ -304,7 +309,9 @@ func (r *ClusterNodeServer) UpdateLogs(ctx context.Context, req *raft_cluster_v1
 		})
 	}
 
-	Log.Debug("logs update requested", slog.String("port", r.Settings.Port))
+	if r.SizeLogs > 0 {
+		Log.Debug("Update requested", slog.Int("leadID", r.IdNode))
+	}
 	return &raft_cluster_v1.SyncLog{
 		Term: r.Term,
 		Logs: logs,
@@ -318,7 +325,7 @@ func (r *ClusterNodeServer) UpdateLogs(ctx context.Context, req *raft_cluster_v1
 // after the HeartBeatTimeout expires folower start election and send RequestVote to all nodes [Candidate method]
 // TODO: HeartBeat timer to new lead
 func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster_v1.Empty) (*raft_cluster_v1.ElectionDecision, error) {
-	Log.Debug("START Election", slog.Int("node_id", r.IdNode), slog.String("address", r.Settings.Port))
+	Log.Debug("START Election", slog.Int("nodeID", r.IdNode), slog.String("address", r.Settings.Port))
 	select {
 	case <-ctx.Done():
 		return &raft_cluster_v1.ElectionDecision{Term: r.Term}, ctx.Err()
@@ -342,16 +349,20 @@ func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster
 
 	ballotbox := 0
 	for id, network_client := range r.Network {
-		Log.Debug("Send VoteReq", slog.Int("node_id", r.IdNode), slog.String("address", r.Settings.Port))
-		bulletin, err := network_client.RequestVote(ctx, &raft_cluster_v1.RequestVoteRequest{
+		Log.Debug("Send VoteReq", slog.Int("nodeID", r.IdNode), slog.String("address", r.Settings.Port))
+		bulletin, err := network_client.RequestVote(r.nodeCtx, &raft_cluster_v1.RequestVoteRequest{
 			Term:         r.Term,
 			LastLogTerm:  LastLogTerm,
 			LastLogIndex: int64(LastLogIndex),
+			SenderId: int64(r.IdNode),
 		})
 
 		if err != nil {
 			// network err
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				continue
+			}
+			if strings.Contains(err.Error(), "refused") {
 				continue
 			}
 			// update our node data and state, if we are not legigimate
@@ -364,7 +375,7 @@ func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster
 		}
 	}
 
-	Log.Debug("TEMP Election temp results", slog.Int("node_id", r.IdNode), slog.Int("ballotbox", ballotbox))
+	Log.Debug("TEMP Election temp results", slog.Int("nodeID", r.IdNode), slog.Int("ballotbox", ballotbox))
 	// checking qourum requirement
 	// ballotbox + candidate votes to yourself
 	if ballotbox+1 >= r.Settings.Quorum {
@@ -435,16 +446,54 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 	default:
 	}
 
-	r.ResetElectionTimer(ctx)
+	r.ResetElectionTimer(r.nodeCtx)
+
+	// update
+	update := func (){
+		
+		r.mu.Lock()
+		resp, err := r.Network[req.SenderId].UpdateLogs(r.nodeCtx, &raft_cluster_v1.Empty{})
+		if err != nil {
+			r.BecameCandidate(r.nodeCtx)
+			// return &raft_cluster_v1.HeartBeatResponse{Term: r.Term}, err
+		}
+		newLog := make([]model.Instance, 0)
+		if len(resp.Logs) != 0 {
+			for _, log := range resp.Logs {
+				UUID, _ := uuid.Parse(log.Id)
+				newLog = append(newLog, model.Instance{
+					Id:      UUID,
+					Content: model.JsonData{Name: log.JsonString},
+					Term:    log.Term,
+				})
+			}
+		}
+		r.Logs = newLog
+		if len(newLog) > 0 {
+			Log.Debug("Updated", slog.Int("nodeID", int(r.IdNode)), slog.String("last", r.Logs[0].Content.Name))
+		}
+		r.SizeLogs = len(r.Logs)
+		r.mu.Unlock()
+	}
+
+	// if req.PrevLogIndex != int64(r.SizeLogs-1) {
+	// 	update()
+	// } else if req.PrevLogIndex != -1 && r.SizeLogs != 0 {
+	// 	if req.PrevLogIndex != int64(r.SizeLogs-1) || req.PrevLogTerm != r.Logs[r.SizeLogs-1].Term {
+	// 		update()
+	// 	}
+	// }
 
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	if r.Term < req.Term {
 		if r.State == Lead || r.State == Candidate {
 			r.State = Follower
 		}
+		r.mu.RUnlock()
+		update()
 		return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, nil
 	} else if r.Term > req.Term {
+		r.mu.RUnlock()
 		return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, errors.New("voter's term greater, candidate not legitimate")
 	} else {
 		// if request was sendet to high level nodes, they changing their state
@@ -452,9 +501,12 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 
 		// check relevance logs
 		if req.LastLogTerm > r.Logs[r.SizeLogs-1].Term {
+			r.mu.RUnlock()
+			update()
 			// term more than our -> relevated, vote yes
 			return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, nil
 		} else if req.LastLogTerm < r.Logs[r.SizeLogs-1].Term {
+			r.mu.RUnlock()
 			return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, errors.New("voter's term last log greater, candidate not legitimate")
 
 		} else {
@@ -463,8 +515,11 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 				if r.State == Lead || r.State == Candidate {
 					r.State = Follower
 				}
+				r.mu.RUnlock()
+				update()
 				return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, nil
 			} else {
+				r.mu.RUnlock()
 				return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, errors.New("voter's logs more complete, candidate not legitimate")
 			}
 		}
@@ -533,8 +588,8 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 		if err != nil {
 			return &raft_cluster_v1.LogAccept{Term: r.Term}, err
 		} else {
-			
-			Log.Info("Load log to Follower", slog.Int("nodeID", r.IdNode), /*slog.String("log", r.Logs[r.SizeLogs-1].Content.Name)*/)
+
+			Log.Info("Load log to Follower", slog.Int("nodeID", r.IdNode) /*slog.String("log", r.Logs[r.SizeLogs-1].Content.Name)*/)
 			fmt.Println(r.Logs)
 			r.Term = req.Term
 			r.SizeLogs = len(r.Logs)
@@ -547,7 +602,7 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.LogLeadRequest) (*raft_cluster_v1.Empty, error) {
 	if r.State != Lead {
 		Log.Info("Redirect to LEADNODE", slog.Int("LeadID", r.LeadId))
-		_, err := r.Network[r.LeadId].Append(ctx, req)
+		_, err := r.Network[r.LeadId].Append(r.nodeCtx, req)
 		return &raft_cluster_v1.Empty{}, err
 	}
 	if req == nil {
@@ -559,8 +614,8 @@ func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.Log
 		Index:      int64(r.SizeLogs),
 		JsonString: req.JsonString,
 	}
-	_, err := r.LoadLog(ctx, log)
-	
+	_, err := r.LoadLog(r.nodeCtx, log)
+
 	Log.Info("Load log to Lead", slog.Int("nodeID", r.IdNode), slog.String("log", r.Logs[r.SizeLogs-1].Content.Name))
 	fmt.Println(r.Logs)
 	if err != nil {
@@ -573,7 +628,7 @@ func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.Log
 		if loaded == r.Settings.Quorum {
 			break
 		}
-		resp, err := node.LoadLog(ctx, log)
+		resp, err := node.LoadLog(r.nodeCtx, log)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 				r.Network = slices.Delete(r.Network, id-1, id)

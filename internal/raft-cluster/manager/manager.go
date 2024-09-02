@@ -34,8 +34,8 @@ type Manager struct {
 	mu          sync.Mutex
 
 	// testing
-	contexts []context.Context
-	cancels  []context.CancelFunc
+	test_context_0 context.Context
+	test_cancel_0  context.CancelFunc
 }
 
 func (r *Manager) StartCluster() error {
@@ -115,7 +115,7 @@ func (r *Manager) StartCluster() error {
 
 	cluster_node.Log.Info("Cluster started")
 
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(25 * time.Millisecond)
 	return nil
 }
 
@@ -141,8 +141,8 @@ func (r *Manager) SetLog(uuid, jsonString string) error {
 	return err
 }
 
-func (r *Manager) GetLogs() []model.Instance {
-	return r.cluster[0].Logs
+func (r *Manager) GetLogs(nodeID int) []model.Instance {
+	return r.cluster[nodeID].Logs
 }
 
 /*
@@ -186,7 +186,7 @@ func getFreePort() (int, error) {
 
 func (r *Manager) StartTestCluster() error {
 	if len(r.cluster) > 0 {
-		return errors.New("alredy running")
+		return errors.New("already running")
 	}
 	cluster_node.Log.Info("TEST Starting cluster...")
 
@@ -195,15 +195,10 @@ func (r *Manager) StartTestCluster() error {
 		return err
 	}
 
-	// init contexts
+	// init test context
+	r.test_context_0, r.test_cancel_0 = context.WithCancel(context.Background())
 
-	for i := 0; i < settings.Size; i++ {
-		ctx, cancel := context.WithCancel(context.Background())
-		r.contexts = append(r.contexts, ctx)
-		r.cancels = append(r.cancels, cancel)
-	}
-
-	// crete our cluster
+	// create our cluster
 	r.cluster = make([]*cluster_node.ClusterNodeServer, settings.Size)
 	r.leadId = -1
 
@@ -222,7 +217,13 @@ func (r *Manager) StartTestCluster() error {
 		r.wg.Add(1)
 		go func(id int) {
 			defer r.wg.Done()
-			err := r.cluster[i].Serve(r.contexts[i])
+			var err error
+			// inject test context
+			if id == 0 {
+				err = r.cluster[i].Serve(r.test_context_0)
+			} else {
+				err = r.cluster[i].Serve(r.ctx)
+			}
 			if err != nil {
 				r.mu.Lock()
 				countActive--
@@ -235,20 +236,20 @@ func (r *Manager) StartTestCluster() error {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// check minimal cluster size requierment
+	// check minimal cluster size requirement
 	if countActive < settings.ReplicationFactor {
 		r.GracefullyStop()
-		return errors.New("interal server error with nodes, replication factor not required")
+		return errors.New("internal server error with nodes, replication factor not required")
 	}
 
 	// create Network
 	for i, node := range r.cluster {
-		for i_cl, acive_node := range r.cluster {
+		for i_cl, active_node := range r.cluster {
 			if i_cl != i {
-				conn, err := grpc.NewClient("localhost"+acive_node.Settings.Port,
+				conn, err := grpc.NewClient("localhost"+active_node.Settings.Port,
 					grpc.WithTransportCredentials(insecure.NewCredentials()))
 				if err != nil {
-					cluster_node.Log.Warn("Failed to create gRPC client", slog.Int("node_id", acive_node.IdNode), slog.String("error", err.Error()))
+					cluster_node.Log.Error("Failed to create gRPC client", slog.Int("node_id", active_node.IdNode), slog.String("error", err.Error()))
 				}
 				client := raft_cluster_v1.NewClusterNodeClient(conn)
 				node.Network = append(node.Network, client)
@@ -262,18 +263,18 @@ func (r *Manager) StartTestCluster() error {
 	conn, err := grpc.NewClient("localhost"+r.cluster[0].Settings.Port,
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		cluster_node.Log.Warn("Failed to create gRPC client", slog.Int("node_id", r.leadId), slog.String("error", err.Error()))
+		cluster_node.Log.Error("Failed to create gRPC client", slog.Int("node_id", r.leadId), slog.String("error", err.Error()))
 		r.GracefullyStop()
 	}
 	r.globalClient = raft_cluster_v1.NewClusterNodeClient(conn)
 
 	cluster_node.Log.Info("TEST Cluster started")
 
-	time.Sleep(5 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 	return nil
 }
 
-func (r *Manager) TestStopNode(index int) {
-	r.cancels[index]()
-	cluster_node.Log.Debug("Stopped ", slog.Int("id", index))
+func (r *Manager) TestStopNodeId0() {
+	r.test_cancel_0()
+	cluster_node.Log.Debug("Stopped ", slog.Int("id", 0))
 }

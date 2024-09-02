@@ -41,7 +41,7 @@ type ClusterSettings struct {
 	ElectionTimeout         time.Duration
 }
 
-var Log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+var Log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 // Node current role in custer
 type StateType int

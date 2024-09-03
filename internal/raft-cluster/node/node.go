@@ -173,10 +173,7 @@ func (r *ClusterNodeServer) BecameCandidate(ctx context.Context) error {
 		return ctx.Err()
 	default:
 	}
-	Log.Debug("Became Candidate", slog.Int("node_id", r.IdNode), slog.String("address", r.Settings.Port))
-	for _, node := range r.Network {
-		node.SetElectionTimeout(r.nodeCtx, &raft_cluster_v1.Empty{})
-	}
+	Log.Debug("Became Candidate", slog.Int("nodeID", r.IdNode), slog.String("address", r.Settings.Port))
 	r.mu.Lock()
 	// if !r.electionTimer.Stop() {
 	// <-r.electionTimer.C
@@ -216,13 +213,17 @@ func (r *ClusterNodeServer) ResetElectionTimer(ctx context.Context) {
 	}
 
 	// this magic number '4' needed in order to eliminate parallel elections between two nodes
-	duration := time.Duration(r.Settings.HeartBeatTimeout + time.Millisecond*time.Duration(r.IdNode*rand.Intn(5)+5))
+	duration := time.Duration(r.Settings.HeartBeatTimeout + time.Millisecond*time.Duration(r.IdNode*rand.Intn(7)+7))
 	r.electionTimer = time.AfterFunc(duration, func() {
 		select {
 		case <-ctx.Done():
 			Log.Error("Election timer cancelled due to context cancellation")
 			return
 		default:
+			Log.Debug("TO CAND",  slog.Int("nodeID", r.IdNode), slog.String("address", r.Settings.Port))
+			for _, node := range r.Network {
+				node.SetElectionTimeout(r.nodeCtx, &raft_cluster_v1.Empty{})
+			}
 			r.BecameCandidate(r.nodeCtx)
 		}
 	})

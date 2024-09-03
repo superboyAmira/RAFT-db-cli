@@ -50,7 +50,7 @@ func TestNetworkErrWith1Node(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 	// lead died
 	man.TestStopNodeId0()
-	time.Sleep(15 * time.Millisecond)
+	time.Sleep(30 * time.Millisecond)
 
 	man.GracefullyStop()
 }

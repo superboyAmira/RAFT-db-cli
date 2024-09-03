@@ -44,7 +44,7 @@ type ClusterNodeClient interface {
 	// Lead
 	Append(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error)
 	Delete(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error)
-	Get(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error)
+	Get(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*LogLeadResponse, error)
 	// Candidate
 	StartElection(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ElectionDecision, error)
 	RequestVote(ctx context.Context, in *RequestVoteRequest, opts ...grpc.CallOption) (*RequestVoteResponse, error)
@@ -128,9 +128,9 @@ func (c *clusterNodeClient) Delete(ctx context.Context, in *LogLeadRequest, opts
 	return out, nil
 }
 
-func (c *clusterNodeClient) Get(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error) {
+func (c *clusterNodeClient) Get(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*LogLeadResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(Empty)
+	out := new(LogLeadResponse)
 	err := c.cc.Invoke(ctx, ClusterNode_Get_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -171,7 +171,7 @@ type ClusterNodeServer interface {
 	// Lead
 	Append(context.Context, *LogLeadRequest) (*Empty, error)
 	Delete(context.Context, *LogLeadRequest) (*Empty, error)
-	Get(context.Context, *LogLeadRequest) (*Empty, error)
+	Get(context.Context, *LogLeadRequest) (*LogLeadResponse, error)
 	// Candidate
 	StartElection(context.Context, *Empty) (*ElectionDecision, error)
 	RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error)
@@ -206,7 +206,7 @@ func (UnimplementedClusterNodeServer) Append(context.Context, *LogLeadRequest) (
 func (UnimplementedClusterNodeServer) Delete(context.Context, *LogLeadRequest) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Delete not implemented")
 }
-func (UnimplementedClusterNodeServer) Get(context.Context, *LogLeadRequest) (*Empty, error) {
+func (UnimplementedClusterNodeServer) Get(context.Context, *LogLeadRequest) (*LogLeadResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Get not implemented")
 }
 func (UnimplementedClusterNodeServer) StartElection(context.Context, *Empty) (*ElectionDecision, error) {

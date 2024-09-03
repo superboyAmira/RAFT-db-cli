@@ -351,7 +351,7 @@ func (r *ClusterNodeServer) ReciveHeartBeat(ctx context.Context, req *raft_clust
 
 // after the HeartBeatTimeout expires folower start election and send RequestVote to all nodes [Candidate method]
 func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster_v1.Empty) (*raft_cluster_v1.ElectionDecision, error) {
-	Log.Debug("Start Election...", slog.Int("nodeID", r.IdNode), slog.String("address", r.Settings.Port))
+	Log.Debug("Start Election...", slog.Int("term", int(r.Term+1)),  slog.Int("nodeID", r.IdNode), slog.String("address", r.Settings.Port))
 	select {
 	case <-ctx.Done():
 		return &raft_cluster_v1.ElectionDecision{Term: r.Term}, ctx.Err()
@@ -616,6 +616,12 @@ func (r *ClusterNodeServer) LoadLog(ctx context.Context, req *raft_cluster_v1.Lo
 
 // Load log to Cluster. This is an abstract method for changing data in the entire cluster.
 func (r *ClusterNodeServer) Append(ctx context.Context, req *raft_cluster_v1.LogLeadRequest) (*raft_cluster_v1.Empty, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	
 	if r.State != Lead {
 		Log.Info("Redirect to LEADNODE append", slog.Int("LeadID", r.LeadId))
 		_, err := r.Network[r.LeadId].Append(r.nodeCtx, req)
@@ -717,15 +723,23 @@ func (r *ClusterNodeServer) DeleteLog(ctx context.Context, req *raft_cluster_v1.
 			return &raft_cluster_v1.LogAccept{Term: r.Term}, err
 		} else {
 			Log.Info("Deleted log from Follower", slog.Int("nodeID", r.IdNode), slog.String("uuid", req.Id))
+			r.mu.Lock()
 			r.Term = req.Term
 			r.SizeLogs = len(r.Logs)
+			r.mu.Unlock()
 			return &raft_cluster_v1.LogAccept{Term: r.Term}, nil
 		}
 	}
 }
 
-// Load log to Cluster. This is an abstract method for changing data in the entire cluster.
+// Deleted log from Cluster. This is an abstract method for changing data in the entire cluster.
 func (r *ClusterNodeServer) Delete(ctx context.Context, req *raft_cluster_v1.LogLeadRequest) (*raft_cluster_v1.Empty, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	
 	if r.State != Lead {
 		Log.Info("Redirect to LEADNODE Delete", slog.Int("LeadID", r.LeadId))
 		_, err := r.Network[r.LeadId].Delete(r.nodeCtx, req)
@@ -769,4 +783,35 @@ func (r *ClusterNodeServer) Delete(ctx context.Context, req *raft_cluster_v1.Log
 		}
 		return &raft_cluster_v1.Empty{}, nil
 	}
+}
+
+// Get log from Cluster. This is an abstract method for changing data in the entire cluster.
+func (r *ClusterNodeServer) Get(ctx context.Context, req *raft_cluster_v1.LogLeadRequest) (*raft_cluster_v1.LogLeadResponse, error) {
+	if r.State != Lead {
+		Log.Info("Redirect to LEADNODE Delete", slog.Int("LeadID", r.LeadId))
+		_, err := r.Network[r.LeadId].Delete(r.nodeCtx, req)
+		return nil, err
+	}
+	if req == nil {
+		return nil, errors.New("nil reference req")
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, instance := range r.Logs {
+		if instance.Id == req.Id {
+			return &raft_cluster_v1.LogLeadResponse{
+				Id: instance.Id,
+				JsonString: instance.Content.Name,
+			}, nil
+		}
+	}
+	
+	return nil, errors.New("not found")
 }

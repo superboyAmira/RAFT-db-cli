@@ -33,8 +33,30 @@ func TestLoadLog(t *testing.T) {
 	logs := man.GetLogs(0)
 	if logs == nil {
 		t.Error("logs nil responsed")
-	} else if logs[0].Id == id {
+	} else if logs[0].Id != id {
 		t.Errorf("%s not equal %s", logs[0].Id, id)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	man.GracefullyStop()
+}
+
+func TestGetLog(t *testing.T) {
+	man := manager.Manager{}
+	err := man.StartCluster()
+	if err != nil {
+		t.Error(err.Error())
+	}
+	id := uuid.NewString()
+	err = man.SetLog(id, "{\"name\": \"Chapayev Mustache comb\"}")
+	if err != nil {
+		t.Error(err.Error())
+	}
+	uuid, err := man.GetLog(id)
+	if err != nil {
+		t.Error(err.Error())
+	} else if uuid != "{\"name\": \"Chapayev Mustache comb\"}" {
+		t.Errorf("%s not equal %s", uuid, id)
 	}
 	time.Sleep(10 * time.Millisecond)
 

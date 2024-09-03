@@ -270,7 +270,7 @@ func (r *Manager) StartTestCluster() error {
 
 	cluster_node.Log.Info("TEST Cluster started")
 
-	time.Sleep(30 * time.Millisecond)
+	time.Sleep(25 * time.Millisecond)
 	return nil
 }
 

@@ -4,6 +4,7 @@ package raft_v1;
 
 option go_package = "pkg/raft/raft_cluster_v1";
 service ClusterNode {
+    rpc SetElectionTimeout(Empty) returns (Empty);
     // Follower
     rpc LoadLog(LogInfo) returns (LogAccept);
     rpc SetLeader(LeadInfo) returns (LeadAccept);

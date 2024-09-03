@@ -19,19 +19,21 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ClusterNode_LoadLog_FullMethodName         = "/raft_v1.ClusterNode/LoadLog"
-	ClusterNode_SetLeader_FullMethodName       = "/raft_v1.ClusterNode/SetLeader"
-	ClusterNode_ReciveHeartBeat_FullMethodName = "/raft_v1.ClusterNode/ReciveHeartBeat"
-	ClusterNode_Append_FullMethodName          = "/raft_v1.ClusterNode/Append"
-	ClusterNode_UpdateLogs_FullMethodName      = "/raft_v1.ClusterNode/UpdateLogs"
-	ClusterNode_StartElection_FullMethodName   = "/raft_v1.ClusterNode/StartElection"
-	ClusterNode_RequestVote_FullMethodName     = "/raft_v1.ClusterNode/RequestVote"
+	ClusterNode_SetElectionTimeout_FullMethodName = "/raft_v1.ClusterNode/SetElectionTimeout"
+	ClusterNode_LoadLog_FullMethodName            = "/raft_v1.ClusterNode/LoadLog"
+	ClusterNode_SetLeader_FullMethodName          = "/raft_v1.ClusterNode/SetLeader"
+	ClusterNode_ReciveHeartBeat_FullMethodName    = "/raft_v1.ClusterNode/ReciveHeartBeat"
+	ClusterNode_Append_FullMethodName             = "/raft_v1.ClusterNode/Append"
+	ClusterNode_UpdateLogs_FullMethodName         = "/raft_v1.ClusterNode/UpdateLogs"
+	ClusterNode_StartElection_FullMethodName      = "/raft_v1.ClusterNode/StartElection"
+	ClusterNode_RequestVote_FullMethodName        = "/raft_v1.ClusterNode/RequestVote"
 )
 
 // ClusterNodeClient is the client API for ClusterNode service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ClusterNodeClient interface {
+	SetElectionTimeout(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
 	// Follower
 	LoadLog(ctx context.Context, in *LogInfo, opts ...grpc.CallOption) (*LogAccept, error)
 	SetLeader(ctx context.Context, in *LeadInfo, opts ...grpc.CallOption) (*LeadAccept, error)
@@ -50,6 +52,16 @@ type clusterNodeClient struct {
 
 func NewClusterNodeClient(cc grpc.ClientConnInterface) ClusterNodeClient {
 	return &clusterNodeClient{cc}
+}
+
+func (c *clusterNodeClient) SetElectionTimeout(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, ClusterNode_SetElectionTimeout_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *clusterNodeClient) LoadLog(ctx context.Context, in *LogInfo, opts ...grpc.CallOption) (*LogAccept, error) {
@@ -126,6 +138,7 @@ func (c *clusterNodeClient) RequestVote(ctx context.Context, in *RequestVoteRequ
 // All implementations must embed UnimplementedClusterNodeServer
 // for forward compatibility.
 type ClusterNodeServer interface {
+	SetElectionTimeout(context.Context, *Empty) (*Empty, error)
 	// Follower
 	LoadLog(context.Context, *LogInfo) (*LogAccept, error)
 	SetLeader(context.Context, *LeadInfo) (*LeadAccept, error)
@@ -146,6 +159,9 @@ type ClusterNodeServer interface {
 // pointer dereference when methods are called.
 type UnimplementedClusterNodeServer struct{}
 
+func (UnimplementedClusterNodeServer) SetElectionTimeout(context.Context, *Empty) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetElectionTimeout not implemented")
+}
 func (UnimplementedClusterNodeServer) LoadLog(context.Context, *LogInfo) (*LogAccept, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LoadLog not implemented")
 }
@@ -186,6 +202,24 @@ func RegisterClusterNodeServer(s grpc.ServiceRegistrar, srv ClusterNodeServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&ClusterNode_ServiceDesc, srv)
+}
+
+func _ClusterNode_SetElectionTimeout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterNodeServer).SetElectionTimeout(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterNode_SetElectionTimeout_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterNodeServer).SetElectionTimeout(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _ClusterNode_LoadLog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -321,6 +355,10 @@ var ClusterNode_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "raft_v1.ClusterNode",
 	HandlerType: (*ClusterNodeServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "SetElectionTimeout",
+			Handler:    _ClusterNode_SetElectionTimeout_Handler,
+		},
 		{
 			MethodName: "LoadLog",
 			Handler:    _ClusterNode_LoadLog_Handler,

@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net"
 	"os"
 	"slices"
@@ -118,7 +119,7 @@ func (r *ClusterNodeServer) Serve(ctx context.Context) error {
 		}
 	}()
 
-	time.Sleep(r.Settings.ElectionTimeout*5)
+	time.Sleep(r.Settings.ElectionTimeout*10)
 
 	r.BecameFollower(r.nodeCtx)
 	// waiting cancel() from parent context in manager
@@ -173,6 +174,9 @@ func (r *ClusterNodeServer) BecameCandidate(ctx context.Context) error {
 	default:
 	}
 	Log.Debug("Became Candidate", slog.Int("node_id", r.IdNode), slog.String("address", r.Settings.Port))
+	for _, node := range r.Network {
+		node.SetElectionTimeout(r.nodeCtx, &raft_cluster_v1.Empty{})
+	}
 	r.mu.Lock()
 	// if !r.electionTimer.Stop() {
 	// <-r.electionTimer.C
@@ -193,6 +197,11 @@ func (r *ClusterNodeServer) BecameCandidate(ctx context.Context) error {
 ----------------Heartbeat-------------------
 */
 
+func (r *ClusterNodeServer) SetElectionTimeout(ctx context.Context, req *raft_cluster_v1.Empty) (*raft_cluster_v1.Empty, error) {
+	r.ResetElectionTimer(r.nodeCtx)
+	return nil, nil
+}
+
 func (r *ClusterNodeServer) ResetElectionTimer(ctx context.Context) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -207,7 +216,7 @@ func (r *ClusterNodeServer) ResetElectionTimer(ctx context.Context) {
 	}
 
 	// this magic number '4' needed in order to eliminate parallel elections between two nodes
-	duration := time.Duration(r.Settings.HeartBeatTimeout + time.Millisecond*time.Duration(r.IdNode)*4)
+	duration := time.Duration(r.Settings.HeartBeatTimeout + time.Millisecond*time.Duration(r.IdNode*rand.Intn(5)+5))
 	r.electionTimer = time.AfterFunc(duration, func() {
 		select {
 		case <-ctx.Done():
@@ -365,6 +374,7 @@ func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster
 			if strings.Contains(err.Error(), "refused") {
 				continue
 			}
+			Log.Warn(err.Error())
 			// update our node data and state, if we are not legigimate
 			r.Term = bulletin.Term
 			r.LeadId = id
@@ -498,6 +508,13 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 	} else {
 		// if request was sendet to high level nodes, they changing their state
 		// it doesn`t mean that they always responsed 'yes', need check relevance logs
+		if r.SizeLogs == 0 {
+			r.mu.RUnlock()
+			if req.LastLogIndex > -1 {
+				update()
+			}
+			return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, nil
+		}
 
 		// check relevance logs
 		if req.LastLogTerm > r.Logs[r.SizeLogs-1].Term {

@@ -105,26 +105,26 @@ func TestNetworkErrWithNotLeadNodeWithReplica(t *testing.T) {
 	man.GracefullyStop()
 }
 
-// func TestNa(t *testing.T) {
-// 	man := manager.Manager{}
-// 	err := man.StartTestCluster(true) // for connection global ctx
-// 	if err != nil {
-// 		t.Error(err.Error())
-// 	}
-// 	// load log
-// 	id := uuid.NewString()
-// 	err = man.SetLog(id, "{\"name\": \"Chapayev Mustache comb\"}")
-// 	if err != nil {
-// 		t.Error(err.Error())
-// 	}
+func TestNa(t *testing.T) {
+	man := manager.Manager{}
+	err := man.StartCluster() // for connection global ctx
+	if err != nil {
+		t.Error(err.Error())
+	}
+	// load log
+	id := uuid.NewString()
+	err = man.SetLog(id, "{\"name\": \"Chapayev Mustache comb\"}")
+	if err != nil {
+		t.Error(err.Error())
+	}
 
-// 	time.Sleep(5 * time.Millisecond)
-// 	// lead died
-// 	man.TestStopNodeId0()
-// 	time.Sleep(50 * time.Millisecond)
+	time.Sleep(5 * time.Millisecond)
+	// lead died
+	man.StopCluster[0]()
+	time.Sleep(50 * time.Millisecond)
 
-// 	man.TestStopNodeId1()
-// 	time.Sleep(50 * time.Millisecond)
+	man.StopCluster[1]()
+	time.Sleep(50 * time.Millisecond)
 
-// 	man.GracefullyStop()
-// }
+	man.GracefullyStop()
+}

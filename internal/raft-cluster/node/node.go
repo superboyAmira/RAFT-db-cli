@@ -516,7 +516,7 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 	defer r.mu.RUnlock()
 	if r.Term < req.Term {
 		if r.State == Lead || r.State == Candidate {
-			r.State = Follower
+			r.BecameFollower(r.nodeCtx)
 		}
 		return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, nil
 	} else if r.Term > req.Term {
@@ -539,7 +539,7 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 			// if terms equal checking lenght of logs
 			if req.LastLogIndex > int64(r.SizeLogs)-1 {
 				if r.State == Lead || r.State == Candidate {
-					r.State = Follower
+					r.BecameFollower(r.nodeCtx)
 				}
 				return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, nil
 			} else {

@@ -24,7 +24,6 @@ const (
 	ClusterNode_SetLeader_FullMethodName          = "/raft_v1.ClusterNode/SetLeader"
 	ClusterNode_ReciveHeartBeat_FullMethodName    = "/raft_v1.ClusterNode/ReciveHeartBeat"
 	ClusterNode_Append_FullMethodName             = "/raft_v1.ClusterNode/Append"
-	ClusterNode_UpdateLogs_FullMethodName         = "/raft_v1.ClusterNode/UpdateLogs"
 	ClusterNode_StartElection_FullMethodName      = "/raft_v1.ClusterNode/StartElection"
 	ClusterNode_RequestVote_FullMethodName        = "/raft_v1.ClusterNode/RequestVote"
 )
@@ -40,7 +39,6 @@ type ClusterNodeClient interface {
 	ReciveHeartBeat(ctx context.Context, in *HeartBeatRequest, opts ...grpc.CallOption) (*HeartBeatResponse, error)
 	// Lead
 	Append(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error)
-	UpdateLogs(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*SyncLog, error)
 	// Candidate
 	StartElection(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ElectionDecision, error)
 	RequestVote(ctx context.Context, in *RequestVoteRequest, opts ...grpc.CallOption) (*RequestVoteResponse, error)
@@ -104,16 +102,6 @@ func (c *clusterNodeClient) Append(ctx context.Context, in *LogLeadRequest, opts
 	return out, nil
 }
 
-func (c *clusterNodeClient) UpdateLogs(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*SyncLog, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SyncLog)
-	err := c.cc.Invoke(ctx, ClusterNode_UpdateLogs_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *clusterNodeClient) StartElection(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ElectionDecision, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ElectionDecision)
@@ -145,7 +133,6 @@ type ClusterNodeServer interface {
 	ReciveHeartBeat(context.Context, *HeartBeatRequest) (*HeartBeatResponse, error)
 	// Lead
 	Append(context.Context, *LogLeadRequest) (*Empty, error)
-	UpdateLogs(context.Context, *Empty) (*SyncLog, error)
 	// Candidate
 	StartElection(context.Context, *Empty) (*ElectionDecision, error)
 	RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error)
@@ -173,9 +160,6 @@ func (UnimplementedClusterNodeServer) ReciveHeartBeat(context.Context, *HeartBea
 }
 func (UnimplementedClusterNodeServer) Append(context.Context, *LogLeadRequest) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Append not implemented")
-}
-func (UnimplementedClusterNodeServer) UpdateLogs(context.Context, *Empty) (*SyncLog, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method UpdateLogs not implemented")
 }
 func (UnimplementedClusterNodeServer) StartElection(context.Context, *Empty) (*ElectionDecision, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StartElection not implemented")
@@ -294,24 +278,6 @@ func _ClusterNode_Append_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ClusterNode_UpdateLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(Empty)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ClusterNodeServer).UpdateLogs(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: ClusterNode_UpdateLogs_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ClusterNodeServer).UpdateLogs(ctx, req.(*Empty))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _ClusterNode_StartElection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(Empty)
 	if err := dec(in); err != nil {
@@ -374,10 +340,6 @@ var ClusterNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Append",
 			Handler:    _ClusterNode_Append_Handler,
-		},
-		{
-			MethodName: "UpdateLogs",
-			Handler:    _ClusterNode_UpdateLogs_Handler,
 		},
 		{
 			MethodName: "StartElection",

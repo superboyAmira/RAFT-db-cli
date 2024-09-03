@@ -68,8 +68,8 @@ type ClusterNodeServer struct {
 	LeadId        int
 	electionTimer *time.Timer
 
-	mu      sync.RWMutex
-	nodeCtx context.Context
+	mu         sync.RWMutex
+	nodeCtx    context.Context
 	nodeCancel context.CancelFunc
 
 	raft_cluster_v1.UnimplementedClusterNodeServer
@@ -100,7 +100,7 @@ func (r *ClusterNodeServer) Serve(ctx context.Context) error {
 	// copy to local context
 	// this useful to untie the execution of a node from the context of the entire cluster.
 	// When using a shared cluster, when they fail, the context of the entire cluster will be canceled.
-	r.nodeCtx, r.nodeCancel = context.WithCancel(ctx) 
+	r.nodeCtx, r.nodeCancel = context.WithCancel(ctx)
 
 	listen, err := net.Listen("tcp", r.Settings.Port)
 	if err != nil {
@@ -119,7 +119,7 @@ func (r *ClusterNodeServer) Serve(ctx context.Context) error {
 		}
 	}()
 
-	time.Sleep(r.Settings.ElectionTimeout*10)
+	time.Sleep(r.Settings.ElectionTimeout * 10)
 
 	r.BecameFollower(r.nodeCtx)
 	// waiting cancel() from parent context in manager
@@ -220,7 +220,7 @@ func (r *ClusterNodeServer) ResetElectionTimer(ctx context.Context) {
 			Log.Error("Election timer cancelled due to context cancellation")
 			return
 		default:
-			Log.Debug("TO CAND",  slog.Int("nodeID", r.IdNode), slog.String("address", r.Settings.Port))
+			Log.Debug("TO CAND", slog.Int("nodeID", r.IdNode), slog.String("address", r.Settings.Port))
 			for _, node := range r.Network {
 				node.SetElectionTimeout(r.nodeCtx, &raft_cluster_v1.Empty{})
 			}
@@ -302,32 +302,6 @@ func (r *ClusterNodeServer) ReciveHeartBeat(ctx context.Context, req *raft_clust
 	}
 }
 
-func (r *ClusterNodeServer) UpdateLogs(ctx context.Context, req *raft_cluster_v1.Empty) (*raft_cluster_v1.SyncLog, error) {
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	logs := make([]*raft_cluster_v1.LogInfo, 0)
-	for i, log := range r.Logs {
-		logs = append(logs, &raft_cluster_v1.LogInfo{
-			Id:         log.Id.String(),
-			Term:       log.Term,
-			Index:      int64(i),
-			JsonString: log.Content.Name,
-		})
-	}
-
-	if r.SizeLogs > 0 {
-		Log.Debug("Update requested", slog.Int("leadID", r.IdNode))
-	}
-	return &raft_cluster_v1.SyncLog{
-		Term: r.Term,
-		Logs: logs,
-	}, nil
-}
-
 /*
 ----------------Election-------------------
 */
@@ -357,14 +331,14 @@ func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster
 	}
 	r.mu.RUnlock()
 
-	ballotbox := 0
+	ballotbox := 1
 	for id, network_client := range r.Network {
 		Log.Debug("Send VoteReq", slog.Int("nodeID", r.IdNode), slog.String("address", r.Settings.Port))
 		bulletin, err := network_client.RequestVote(r.nodeCtx, &raft_cluster_v1.RequestVoteRequest{
 			Term:         r.Term,
 			LastLogTerm:  LastLogTerm,
 			LastLogIndex: int64(LastLogIndex),
-			SenderId: int64(r.IdNode),
+			SenderId:     int64(r.IdNode),
 		})
 
 		if err != nil {
@@ -389,11 +363,20 @@ func (r *ClusterNodeServer) StartElection(ctx context.Context, req *raft_cluster
 	Log.Debug("TEMP Election temp results", slog.Int("nodeID", r.IdNode), slog.Int("ballotbox", ballotbox))
 	// checking qourum requirement
 	// ballotbox + candidate votes to yourself
-	if ballotbox+1 >= r.Settings.Quorum {
+	if ballotbox >= r.Settings.Quorum {
 		r.State = Lead
+		logs := make([]*raft_cluster_v1.LogInfo, 0)
+		for i, log := range r.Logs {
+			logs = append(logs, &raft_cluster_v1.LogInfo{
+				Id:         log.Id.String(),
+				Term:       log.Term,
+				Index:      int64(i),
+				JsonString: log.Content.Name,
+			})
+		}
 		// send all nodes, that current node became a lead
 		for _, node := range r.Network {
-			node.SetLeader(ctx, &raft_cluster_v1.LeadInfo{IdLeader: int64(r.IdNode), Term: r.Term})
+			node.SetLeader(ctx, &raft_cluster_v1.LeadInfo{IdLeader: int64(r.IdNode), Term: r.Term, Logs: logs})
 			// _, err := node.SetLeader(ctx, &raft_cluster_v1.LeadInfo{IdLeader: int64(r.IdNode), Term: r.Term})
 			// start Lead HeartBeat
 			// go r.HeartBeatTicker(ctx)
@@ -431,13 +414,33 @@ func (r *ClusterNodeServer) SetLeader(ctx context.Context, req *raft_cluster_v1.
 
 	commit := make(chan error, 1)
 	go func() {
+
 		r.mu.Lock()
 		defer r.mu.Unlock()
 
 		r.LeadId = int(req.IdLeader)
 		r.Term = req.Term
+		newLog := make([]model.Instance, 0)
+		if len(req.Logs) != 0 {
+			for _, log := range req.Logs {
+				UUID, _ := uuid.Parse(log.Id)
+				newLog = append(newLog, model.Instance{
+					Id:      UUID,
+					Content: model.JsonData{Name: log.JsonString},
+					Term:    log.Term,
+				})
+			}
+		}
+		r.Logs = newLog
+		if len(newLog) > 0 {
+			Log.Debug("Updated", slog.Int("nodeID", int(r.IdNode)), slog.String("last", r.Logs[0].Content.Name))
+		}
+		r.SizeLogs = len(r.Logs)
+
 		commit <- nil
 	}()
+
+	r.ResetElectionTimer(ctx)
 
 	// control for context
 	select {
@@ -458,73 +461,29 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 	}
 
 	r.ResetElectionTimer(r.nodeCtx)
-
-	// update
-	update := func (){
-		
-		r.mu.Lock()
-		resp, err := r.Network[req.SenderId].UpdateLogs(r.nodeCtx, &raft_cluster_v1.Empty{})
-		if err != nil {
-			r.BecameCandidate(r.nodeCtx)
-			// return &raft_cluster_v1.HeartBeatResponse{Term: r.Term}, err
-		}
-		newLog := make([]model.Instance, 0)
-		if len(resp.Logs) != 0 {
-			for _, log := range resp.Logs {
-				UUID, _ := uuid.Parse(log.Id)
-				newLog = append(newLog, model.Instance{
-					Id:      UUID,
-					Content: model.JsonData{Name: log.JsonString},
-					Term:    log.Term,
-				})
-			}
-		}
-		r.Logs = newLog
-		if len(newLog) > 0 {
-			Log.Debug("Updated", slog.Int("nodeID", int(r.IdNode)), slog.String("last", r.Logs[0].Content.Name))
-		}
-		r.SizeLogs = len(r.Logs)
-		r.mu.Unlock()
-	}
-
-	// if req.PrevLogIndex != int64(r.SizeLogs-1) {
-	// 	update()
-	// } else if req.PrevLogIndex != -1 && r.SizeLogs != 0 {
-	// 	if req.PrevLogIndex != int64(r.SizeLogs-1) || req.PrevLogTerm != r.Logs[r.SizeLogs-1].Term {
-	// 		update()
-	// 	}
-	// }
+	defer r.ResetElectionTimer(r.nodeCtx)
 
 	r.mu.RLock()
+	defer r.mu.RUnlock()
 	if r.Term < req.Term {
 		if r.State == Lead || r.State == Candidate {
 			r.State = Follower
 		}
-		r.mu.RUnlock()
-		update()
 		return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, nil
 	} else if r.Term > req.Term {
-		r.mu.RUnlock()
 		return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, errors.New("voter's term greater, candidate not legitimate")
 	} else {
 		// if request was sendet to high level nodes, they changing their state
 		// it doesn`t mean that they always responsed 'yes', need check relevance logs
 		if r.SizeLogs == 0 {
-			r.mu.RUnlock()
-			if req.LastLogIndex > -1 {
-				update()
-			}
 			return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, nil
 		}
 
 		// check relevance logs
 		if req.LastLogTerm > r.Logs[r.SizeLogs-1].Term {
-			r.mu.RUnlock()
-			update()
 			// term more than our -> relevated, vote yes
 			return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, nil
 		} else if req.LastLogTerm < r.Logs[r.SizeLogs-1].Term {
-			r.mu.RUnlock()
 			return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, errors.New("voter's term last log greater, candidate not legitimate")
 
 		} else {
@@ -533,11 +492,8 @@ func (r *ClusterNodeServer) RequestVote(ctx context.Context, req *raft_cluster_v
 				if r.State == Lead || r.State == Candidate {
 					r.State = Follower
 				}
-				r.mu.RUnlock()
-				update()
 				return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, nil
 			} else {
-				r.mu.RUnlock()
 				return &raft_cluster_v1.RequestVoteResponse{Term: r.Term}, errors.New("voter's logs more complete, candidate not legitimate")
 			}
 		}

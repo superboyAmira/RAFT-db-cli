@@ -43,6 +43,7 @@ message LeadInfo {
     // if follower get a req with lower term - he ignored this req and responsed actual term
     int64 term = 2;
     repeated LogInfo logs = 3; 
+    bool needToUpdate = 4;
 }
 
 message LeadAccept {

@@ -15,7 +15,7 @@ func TestBasicStartCluster(t *testing.T) {
 		t.Error(err.Error())
 	}
 
-	time.Sleep(10 *time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	man.GracefullyStop()
 }
 
@@ -33,10 +33,39 @@ func TestLoadLog(t *testing.T) {
 	logs := man.GetLogs(0)
 	if logs == nil {
 		t.Error("logs nil responsed")
-	} else if logs[0].Id.String() == id {
-		t.Errorf("%s not equal %s", logs[0].Id.String(), id)
+	} else if logs[0].Id == id {
+		t.Errorf("%s not equal %s", logs[0].Id, id)
 	}
-	time.Sleep(10* time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
+
+	man.GracefullyStop()
+}
+
+func TestDeleteLog(t *testing.T) {
+	man := manager.Manager{}
+	err := man.StartCluster()
+	if err != nil {
+		t.Error(err.Error())
+	}
+	id := uuid.NewString()
+	err = man.SetLog(id, "{\"name\": \"Chapayev Mustache comb\"}")
+	if err != nil {
+		t.Error(err.Error())
+	}
+	logs := man.GetLogs(0)
+	if logs == nil {
+		t.Error("logs nil responsed")
+	} else if logs[0].Id != id {
+		t.Errorf("%s!%s!", logs[0].Id, id)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	err = man.DeleteLog(logs[0].Id, "")
+	if err != nil {
+		t.Error(err.Error())
+	}
+
+	time.Sleep(10 * time.Millisecond)
 
 	man.GracefullyStop()
 }
@@ -49,9 +78,8 @@ func TestNetworkErrWith1Node(t *testing.T) {
 	}
 	time.Sleep(5 * time.Millisecond)
 	// lead died
-	
+
 	man.StopCluster[0]()
-	
 
 	time.Sleep(100 * time.Millisecond)
 
@@ -81,7 +109,6 @@ func TestNetworkErrWithLeadNodeWithReplica(t *testing.T) {
 	man.GracefullyStop()
 }
 
-
 func TestNetworkErrWithNotLeadNodeWithReplica(t *testing.T) {
 	man := manager.Manager{}
 	err := man.StartCluster()
@@ -105,7 +132,7 @@ func TestNetworkErrWithNotLeadNodeWithReplica(t *testing.T) {
 	man.GracefullyStop()
 }
 
-func TestNa(t *testing.T) {
+func TestTwoDeactivated(t *testing.T) {
 	man := manager.Manager{}
 	err := man.StartCluster() // for connection global ctx
 	if err != nil {

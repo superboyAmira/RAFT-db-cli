@@ -7,16 +7,20 @@ service ClusterNode {
     rpc SetElectionTimeout(Empty) returns (Empty);
     // Follower
     rpc LoadLog(LogInfo) returns (LogAccept);
+    rpc DeleteLog(LogInfo) returns (LogAccept);
     rpc SetLeader(LeadInfo) returns (LeadAccept);
     rpc ReciveHeartBeat(HeartBeatRequest) returns (HeartBeatResponse);
     
     // Lead
     rpc Append(LogLeadRequest) returns (Empty);
+    rpc Delete(LogLeadRequest) returns (Empty);
+    rpc Get(LogLeadRequest) returns (Empty);
     
     // Candidate
     rpc StartElection(Empty) returns (ElectionDecision);
     rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
 }
+
 
 message LogLeadRequest {
     string id = 1;

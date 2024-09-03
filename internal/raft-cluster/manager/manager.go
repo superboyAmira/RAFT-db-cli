@@ -146,6 +146,19 @@ func (r *Manager) SetLog(uuid, jsonString string) error {
 	return err
 }
 
+func (r *Manager) DeleteLog(uuid, jsonString string) error {
+	if len(r.cluster) == 0 {
+		return errors.New("didn't running")
+	}
+	req := &raft_cluster_v1.LogLeadRequest{
+		Id:         uuid,
+		JsonString: jsonString,
+	}
+
+	_, err := r.globalClient.Delete(r.ctx[0], req)
+	return err
+}
+
 func (r *Manager) GetLogs(nodeID int) []model.Instance {
 	return r.cluster[nodeID].Logs
 }

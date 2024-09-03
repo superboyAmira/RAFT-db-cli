@@ -21,9 +21,12 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	ClusterNode_SetElectionTimeout_FullMethodName = "/raft_v1.ClusterNode/SetElectionTimeout"
 	ClusterNode_LoadLog_FullMethodName            = "/raft_v1.ClusterNode/LoadLog"
+	ClusterNode_DeleteLog_FullMethodName          = "/raft_v1.ClusterNode/DeleteLog"
 	ClusterNode_SetLeader_FullMethodName          = "/raft_v1.ClusterNode/SetLeader"
 	ClusterNode_ReciveHeartBeat_FullMethodName    = "/raft_v1.ClusterNode/ReciveHeartBeat"
 	ClusterNode_Append_FullMethodName             = "/raft_v1.ClusterNode/Append"
+	ClusterNode_Delete_FullMethodName             = "/raft_v1.ClusterNode/Delete"
+	ClusterNode_Get_FullMethodName                = "/raft_v1.ClusterNode/Get"
 	ClusterNode_StartElection_FullMethodName      = "/raft_v1.ClusterNode/StartElection"
 	ClusterNode_RequestVote_FullMethodName        = "/raft_v1.ClusterNode/RequestVote"
 )
@@ -35,10 +38,13 @@ type ClusterNodeClient interface {
 	SetElectionTimeout(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
 	// Follower
 	LoadLog(ctx context.Context, in *LogInfo, opts ...grpc.CallOption) (*LogAccept, error)
+	DeleteLog(ctx context.Context, in *LogInfo, opts ...grpc.CallOption) (*LogAccept, error)
 	SetLeader(ctx context.Context, in *LeadInfo, opts ...grpc.CallOption) (*LeadAccept, error)
 	ReciveHeartBeat(ctx context.Context, in *HeartBeatRequest, opts ...grpc.CallOption) (*HeartBeatResponse, error)
 	// Lead
 	Append(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error)
+	Delete(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error)
+	Get(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error)
 	// Candidate
 	StartElection(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ElectionDecision, error)
 	RequestVote(ctx context.Context, in *RequestVoteRequest, opts ...grpc.CallOption) (*RequestVoteResponse, error)
@@ -66,6 +72,16 @@ func (c *clusterNodeClient) LoadLog(ctx context.Context, in *LogInfo, opts ...gr
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(LogAccept)
 	err := c.cc.Invoke(ctx, ClusterNode_LoadLog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *clusterNodeClient) DeleteLog(ctx context.Context, in *LogInfo, opts ...grpc.CallOption) (*LogAccept, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LogAccept)
+	err := c.cc.Invoke(ctx, ClusterNode_DeleteLog_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +118,26 @@ func (c *clusterNodeClient) Append(ctx context.Context, in *LogLeadRequest, opts
 	return out, nil
 }
 
+func (c *clusterNodeClient) Delete(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, ClusterNode_Delete_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *clusterNodeClient) Get(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, ClusterNode_Get_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *clusterNodeClient) StartElection(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ElectionDecision, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ElectionDecision)
@@ -129,10 +165,13 @@ type ClusterNodeServer interface {
 	SetElectionTimeout(context.Context, *Empty) (*Empty, error)
 	// Follower
 	LoadLog(context.Context, *LogInfo) (*LogAccept, error)
+	DeleteLog(context.Context, *LogInfo) (*LogAccept, error)
 	SetLeader(context.Context, *LeadInfo) (*LeadAccept, error)
 	ReciveHeartBeat(context.Context, *HeartBeatRequest) (*HeartBeatResponse, error)
 	// Lead
 	Append(context.Context, *LogLeadRequest) (*Empty, error)
+	Delete(context.Context, *LogLeadRequest) (*Empty, error)
+	Get(context.Context, *LogLeadRequest) (*Empty, error)
 	// Candidate
 	StartElection(context.Context, *Empty) (*ElectionDecision, error)
 	RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error)
@@ -152,6 +191,9 @@ func (UnimplementedClusterNodeServer) SetElectionTimeout(context.Context, *Empty
 func (UnimplementedClusterNodeServer) LoadLog(context.Context, *LogInfo) (*LogAccept, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LoadLog not implemented")
 }
+func (UnimplementedClusterNodeServer) DeleteLog(context.Context, *LogInfo) (*LogAccept, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteLog not implemented")
+}
 func (UnimplementedClusterNodeServer) SetLeader(context.Context, *LeadInfo) (*LeadAccept, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetLeader not implemented")
 }
@@ -160,6 +202,12 @@ func (UnimplementedClusterNodeServer) ReciveHeartBeat(context.Context, *HeartBea
 }
 func (UnimplementedClusterNodeServer) Append(context.Context, *LogLeadRequest) (*Empty, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Append not implemented")
+}
+func (UnimplementedClusterNodeServer) Delete(context.Context, *LogLeadRequest) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Delete not implemented")
+}
+func (UnimplementedClusterNodeServer) Get(context.Context, *LogLeadRequest) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Get not implemented")
 }
 func (UnimplementedClusterNodeServer) StartElection(context.Context, *Empty) (*ElectionDecision, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StartElection not implemented")
@@ -224,6 +272,24 @@ func _ClusterNode_LoadLog_Handler(srv interface{}, ctx context.Context, dec func
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ClusterNode_DeleteLog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LogInfo)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterNodeServer).DeleteLog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterNode_DeleteLog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterNodeServer).DeleteLog(ctx, req.(*LogInfo))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ClusterNode_SetLeader_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(LeadInfo)
 	if err := dec(in); err != nil {
@@ -274,6 +340,42 @@ func _ClusterNode_Append_Handler(srv interface{}, ctx context.Context, dec func(
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ClusterNodeServer).Append(ctx, req.(*LogLeadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ClusterNode_Delete_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LogLeadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterNodeServer).Delete(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterNode_Delete_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterNodeServer).Delete(ctx, req.(*LogLeadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ClusterNode_Get_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LogLeadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterNodeServer).Get(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterNode_Get_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterNodeServer).Get(ctx, req.(*LogLeadRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -330,6 +432,10 @@ var ClusterNode_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ClusterNode_LoadLog_Handler,
 		},
 		{
+			MethodName: "DeleteLog",
+			Handler:    _ClusterNode_DeleteLog_Handler,
+		},
+		{
 			MethodName: "SetLeader",
 			Handler:    _ClusterNode_SetLeader_Handler,
 		},
@@ -340,6 +446,14 @@ var ClusterNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Append",
 			Handler:    _ClusterNode_Append_Handler,
+		},
+		{
+			MethodName: "Delete",
+			Handler:    _ClusterNode_Delete_Handler,
+		},
+		{
+			MethodName: "Get",
+			Handler:    _ClusterNode_Get_Handler,
 		},
 		{
 			MethodName: "StartElection",

@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 	"warehouse/internal/model"
@@ -94,7 +95,7 @@ func (r *Manager) StartCluster() error {
 	for i, node := range r.cluster {
 		for i_cl, acive_node := range r.cluster {
 			if i_cl != i {
-				conn, err := grpc.NewClient("localhost"+acive_node.Settings.Port,
+				conn, err := grpc.NewClient(node.Settings.Host+acive_node.Settings.Port,
 					grpc.WithTransportCredentials(insecure.NewCredentials()))
 				if err != nil {
 					cluster_node.Log.Warn("Failed to create gRPC client", slog.Int("node_id", acive_node.IdNode), slog.String("error", err.Error()))
@@ -108,7 +109,7 @@ func (r *Manager) StartCluster() error {
 
 	// create client for operations with cluster node 0.
 	// In CRUD operations we provided for redirect a request to current lead node
-	conn, err := grpc.NewClient("localhost"+r.cluster[0].Settings.Port,
+	conn, err := grpc.NewClient(r.cluster[0].Settings.Host+r.cluster[0].Settings.Port,
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		cluster_node.Log.Warn("Failed to create gRPC client", slog.Int("node_id", r.leadId), slog.String("error", err.Error()))
@@ -209,4 +210,40 @@ func getFreePort() (int, error) {
 
 	addr := listener.Addr().(*net.TCPAddr)
 	return addr.Port, nil
+}
+
+/*
+----------------Client REPL Info-------------------
+*/
+
+func (r *Manager) GetLeadAddr() (string, error) {
+	if len(r.cluster) == 0 {
+		return "", errors.New("didn't running")
+	}
+	for {
+		for i := 0; i < len(r.cluster); i++ {
+			if r.cluster[i].State == cluster_node.Lead {
+				conn, err := grpc.NewClient(r.cluster[i].Settings.Host+r.cluster[i].Settings.Port,
+					grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if err != nil {
+					cluster_node.Log.Warn("Failed to create gRPC client", slog.Int("node_id", r.leadId), slog.String("error", err.Error()))
+					r.GracefullyStop()
+					return "", err
+				}
+				r.globalClient = raft_cluster_v1.NewClusterNodeClient(conn)
+				return "localhost" + r.cluster[i].Settings.Port, nil
+			}
+		}
+	}
+}
+
+func (r *Manager) GetNodes() (string, error) {
+	if len(r.cluster) == 0 {
+		return "", errors.New("didn't running")
+	}
+	res := strings.Builder{}
+	for _, node := range r.cluster {
+		res.WriteString(node.Settings.Host + node.Settings.Port+"\n")
+	}
+	return res.String(), nil
 }

@@ -41,7 +41,7 @@ type ClusterSettings struct {
 	ElectionTimeout         time.Duration
 }
 
-var Log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+var Log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 // Node current role in custer
 type StateType int
@@ -220,7 +220,7 @@ func (r *ClusterNodeServer) ResetElectionTimer(ctx context.Context) {
 	r.electionTimer = time.AfterFunc(duration, func() {
 		select {
 		case <-ctx.Done():
-			Log.Error("Election timer cancelled due to context cancellation", slog.Int("nodeID", r.IdNode))
+			Log.Debug("Election timer cancelled due to context cancellation", slog.Int("nodeID", r.IdNode))
 			return
 		default:
 			for _, node := range r.Network {

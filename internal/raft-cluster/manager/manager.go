@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"os"
@@ -24,49 +25,52 @@ const (
 )
 
 type Manager struct {
+	Params       *cluster_node.ClusterSettings
 	globalClient raft_cluster_v1.ClusterNodeClient
+	globalId     int
 
 	cluster []*cluster_node.ClusterNodeServer
 	leadId  int
 
-	// ctx         context.Context
-	// stopCluster context.CancelFunc
 	ctx         []context.Context
 	StopCluster []context.CancelFunc
-	wg          sync.WaitGroup
-	mu          sync.Mutex
+
+	activeCluster bool
+	wg            sync.WaitGroup
+	mu            sync.Mutex
 }
 
 func (r *Manager) StartCluster() error {
 	if len(r.cluster) > 0 {
 		return errors.New("alredy running")
 	}
-	cluster_node.Log.Info("Starting cluster...")
+	cluster_node.Log.Debug("Starting cluster...")
 
-	settings, err := loadCfg()
+	var err error
+	r.Params, err = loadCfg()
 	if err != nil {
 		return err
 	}
 
 	// crete our cluster
-	r.cluster = make([]*cluster_node.ClusterNodeServer, settings.Size)
-	r.ctx = make([]context.Context, settings.Size)
-	r.StopCluster = make([]context.CancelFunc, settings.Size)
+	r.cluster = make([]*cluster_node.ClusterNodeServer, r.Params.Size)
+	r.ctx = make([]context.Context, r.Params.Size)
+	r.StopCluster = make([]context.CancelFunc, r.Params.Size)
 	r.leadId = -1
 
 	r.mu = sync.Mutex{}
 
-	for i := 0; i < settings.Size; i++ {
+	for i := 0; i < r.Params.Size; i++ {
 		r.ctx[i], r.StopCluster[i] = context.WithCancel(context.Background())
 	}
 	countActive := 0
 
-	for i := 0; i < settings.Size; i++ {
+	for i := 0; i < r.Params.Size; i++ {
 		port, err := getFreePort()
 		if err != nil {
 			continue
 		}
-		tSettings := *settings
+		tSettings := *r.Params
 		tSettings.Port = ":" + strconv.FormatInt(int64(port), 10)
 		r.cluster[i] = cluster_node.New(i, cluster_node.Follower, r.leadId, 0, &tSettings)
 		r.wg.Add(1)
@@ -86,7 +90,7 @@ func (r *Manager) StartCluster() error {
 	}
 
 	// check minimal cluster size requierment
-	if countActive < settings.ReplicationFactor {
+	if countActive < r.Params.ReplicationFactor {
 		r.GracefullyStop()
 		return errors.New("interal server error with nodes, replication factor not required")
 	}
@@ -109,6 +113,7 @@ func (r *Manager) StartCluster() error {
 
 	// create client for operations with cluster node 0.
 	// In CRUD operations we provided for redirect a request to current lead node
+	r.globalId = 0
 	conn, err := grpc.NewClient(r.cluster[0].Settings.Host+r.cluster[0].Settings.Port,
 		grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -117,17 +122,69 @@ func (r *Manager) StartCluster() error {
 	}
 	r.globalClient = raft_cluster_v1.NewClusterNodeClient(conn)
 
-	cluster_node.Log.Info("Cluster started")
+	cluster_node.Log.Debug("Cluster started")
+
+	r.activeCluster = true
+	r.wg.Add(1)
+	// to start searching for a working note for a client
+	go r.pingActiveClient()
 
 	time.Sleep(25 * time.Millisecond)
 	return nil
 }
 
+// func to reconnected a client if client node isn't valid
+func (r *Manager) pingActiveClient() {
+	r.wg.Done()
+	for {
+		time.Sleep(3 * time.Second)
+		if !r.activeCluster {
+			return
+		}
+
+		// ping our lead
+		_, err := r.globalClient.IsLead(r.ctx[r.globalId], nil)
+		if err != nil {
+			for i := 0; i < r.Params.Size; i++ {
+				cluster_node.Log.Debug("try connect to alive node", slog.Int("i", i), slog.String("port", r.cluster[i].Settings.Port))
+				if i > r.Params.ReplicationFactor-1 {
+					fmt.Printf("cluster size (%v) is smaller than a replication factor (%v)!\n", r.Params.Size-i, r.Params.ReplicationFactor)
+					r.GracefullyStop()
+					return
+				}
+				conn, err := grpc.NewClient(r.cluster[i].Settings.Host+r.cluster[i].Settings.Port,
+					grpc.WithTransportCredentials(insecure.NewCredentials()))
+				if err != nil {
+					cluster_node.Log.Warn("Failed to create gRPC client", slog.Int("node_id", r.leadId), slog.String("error", err.Error()))
+					continue
+				}
+				r.globalClient = raft_cluster_v1.NewClusterNodeClient(conn)
+				_, err = r.globalClient.IsLead(r.ctx[i], nil)
+				if err != nil {
+					cluster_node.Log.Debug("client err", slog.String("err", err.Error()))
+					continue
+				}
+				fmt.Printf("Reconnected to a database of Warehouse 13 at %s%s\n>", r.cluster[i].Settings.Host, r.cluster[i].Settings.Port)
+				r.globalId = i
+				break
+			}
+		}
+	}
+}
+
 func (r *Manager) GracefullyStop() {
+	r.activeCluster = false
 	for _, cancel := range r.StopCluster {
 		cancel()
 	}
 	r.wg.Wait()
+}
+
+func (r *Manager) StopConcreteNode(id int) {
+	if id > len(r.cluster) || id < 0 {
+		return
+	}
+	r.StopCluster[id]()
 }
 
 /*
@@ -143,20 +200,19 @@ func (r *Manager) SetLog(uuid, jsonString string) error {
 		JsonString: jsonString,
 	}
 
-	_, err := r.globalClient.Append(r.ctx[0], req)
+	_, err := r.globalClient.Append(r.ctx[r.globalId], req)
 	return err
 }
 
-func (r *Manager) DeleteLog(uuid, jsonString string) error {
+func (r *Manager) DeleteLog(uuid string) error {
 	if len(r.cluster) == 0 {
 		return errors.New("didn't running")
 	}
 	req := &raft_cluster_v1.LogLeadRequest{
-		Id:         uuid,
-		JsonString: jsonString,
+		Id: uuid,
 	}
 
-	_, err := r.globalClient.Delete(r.ctx[0], req)
+	_, err := r.globalClient.Delete(r.ctx[r.globalId], req)
 	return err
 }
 
@@ -169,8 +225,11 @@ func (r *Manager) GetLog(uuid string) (string, error) {
 		JsonString: "",
 	}
 
-	resp, err := r.globalClient.Get(r.ctx[0], req)
-	return resp.JsonString, err
+	resp, err := r.globalClient.Get(r.ctx[r.globalId], req)
+	if err != nil {
+		return "", err
+	}
+	return resp.JsonString, nil
 }
 
 func (r *Manager) GetLogs(nodeID int) []model.Instance {
@@ -243,7 +302,7 @@ func (r *Manager) GetNodes() (string, error) {
 	}
 	res := strings.Builder{}
 	for _, node := range r.cluster {
-		res.WriteString(node.Settings.Host + node.Settings.Port+"\n")
+		res.WriteString(node.Settings.Host + node.Settings.Port + "\n")
 	}
 	return res.String(), nil
 }

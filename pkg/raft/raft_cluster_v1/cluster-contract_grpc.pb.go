@@ -27,6 +27,7 @@ const (
 	ClusterNode_Append_FullMethodName             = "/raft_v1.ClusterNode/Append"
 	ClusterNode_Delete_FullMethodName             = "/raft_v1.ClusterNode/Delete"
 	ClusterNode_Get_FullMethodName                = "/raft_v1.ClusterNode/Get"
+	ClusterNode_IsLead_FullMethodName             = "/raft_v1.ClusterNode/IsLead"
 	ClusterNode_StartElection_FullMethodName      = "/raft_v1.ClusterNode/StartElection"
 	ClusterNode_RequestVote_FullMethodName        = "/raft_v1.ClusterNode/RequestVote"
 )
@@ -45,6 +46,7 @@ type ClusterNodeClient interface {
 	Append(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error)
 	Delete(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*Empty, error)
 	Get(ctx context.Context, in *LogLeadRequest, opts ...grpc.CallOption) (*LogLeadResponse, error)
+	IsLead(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error)
 	// Candidate
 	StartElection(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ElectionDecision, error)
 	RequestVote(ctx context.Context, in *RequestVoteRequest, opts ...grpc.CallOption) (*RequestVoteResponse, error)
@@ -138,6 +140,16 @@ func (c *clusterNodeClient) Get(ctx context.Context, in *LogLeadRequest, opts ..
 	return out, nil
 }
 
+func (c *clusterNodeClient) IsLead(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Empty)
+	err := c.cc.Invoke(ctx, ClusterNode_IsLead_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *clusterNodeClient) StartElection(ctx context.Context, in *Empty, opts ...grpc.CallOption) (*ElectionDecision, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ElectionDecision)
@@ -172,6 +184,7 @@ type ClusterNodeServer interface {
 	Append(context.Context, *LogLeadRequest) (*Empty, error)
 	Delete(context.Context, *LogLeadRequest) (*Empty, error)
 	Get(context.Context, *LogLeadRequest) (*LogLeadResponse, error)
+	IsLead(context.Context, *Empty) (*Empty, error)
 	// Candidate
 	StartElection(context.Context, *Empty) (*ElectionDecision, error)
 	RequestVote(context.Context, *RequestVoteRequest) (*RequestVoteResponse, error)
@@ -208,6 +221,9 @@ func (UnimplementedClusterNodeServer) Delete(context.Context, *LogLeadRequest) (
 }
 func (UnimplementedClusterNodeServer) Get(context.Context, *LogLeadRequest) (*LogLeadResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Get not implemented")
+}
+func (UnimplementedClusterNodeServer) IsLead(context.Context, *Empty) (*Empty, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IsLead not implemented")
 }
 func (UnimplementedClusterNodeServer) StartElection(context.Context, *Empty) (*ElectionDecision, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method StartElection not implemented")
@@ -380,6 +396,24 @@ func _ClusterNode_Get_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ClusterNode_IsLead_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(Empty)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ClusterNodeServer).IsLead(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ClusterNode_IsLead_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ClusterNodeServer).IsLead(ctx, req.(*Empty))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ClusterNode_StartElection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(Empty)
 	if err := dec(in); err != nil {
@@ -454,6 +488,10 @@ var ClusterNode_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Get",
 			Handler:    _ClusterNode_Get_Handler,
+		},
+		{
+			MethodName: "IsLead",
+			Handler:    _ClusterNode_IsLead_Handler,
 		},
 		{
 			MethodName: "StartElection",

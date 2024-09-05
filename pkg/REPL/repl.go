@@ -5,37 +5,40 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 	"warehouse/internal/raft-cluster/manager"
+
+	"github.com/google/uuid"
 )
 
 const (
-	intput = "> "
-	connect = "Connected to a database of Warehouse 13 at %s\n"
+	intput    = "> "
+	connect   = "Connected to a database of Warehouse 13 at %s\n"
 	reconnect = "Reconnected to a database of Warehouse 13 at %s"
-	nodes = "Known nodes:\n%s"
+	nodes     = "Known nodes:\n%s"
 )
 
 type REPL struct {
 	Client *manager.Manager
-	terminate chan os.Signal 
 }
 
 func (r *REPL) Exec() {
 	r.Client = &manager.Manager{}
 	r.Client.StartCluster()
-	time.Sleep(3*time.Second)
-	scanner := bufio.NewScanner(os.Stdin)
 
-	r.terminate = make(chan os.Signal, 1)
-	signal.Notify(r.terminate, os.Interrupt, syscall.SIGTERM, syscall.SIGABRT, syscall.SIGINT, syscall.SIGTSTP)
-	go func ()  {
-		<-r.terminate
-		r.Client.GracefullyStop()
+	// for testing some background errors
+	go func() {
+		time.Sleep(40 * time.Second)
+		r.Client.StopConcreteNode(0)
 	}()
+
+	go func() {
+		time.Sleep(60 * time.Second)
+		r.Client.StopConcreteNode(2)
+	}()
+
+	scanner := bufio.NewScanner(os.Stdin)
 
 	lead, err := r.Client.GetLeadAddr()
 	if err != nil {
@@ -74,10 +77,15 @@ func (r *REPL) Exec() {
 				fmt.Println("Usage: SET <uuid> <json>")
 				continue
 			}
+			_, err :=uuid.Parse(parts[1])
+			if err != nil {
+				fmt.Println("Error UUID4:", err)
+				continue
+			}
 			if err := r.Client.SetLog(parts[1], parts[2]); err != nil {
 				fmt.Println("Error setting log:", err)
 			} else {
-				fmt.Println("Log entry set.")
+				fmt.Printf("Created (%v replicas)\n", r.Client.Params.ReplicationFactor)
 			}
 		case "GET":
 			if len(parts) != 2 {
@@ -90,14 +98,14 @@ func (r *REPL) Exec() {
 			} else if result == "" {
 				fmt.Println("Log entry not found.")
 			} else {
-				fmt.Println("Log entry:", result)
+				fmt.Println(result)
 			}
 		case "DELETE":
-			if len(parts) != 3 {
-				fmt.Println("Usage: DELETE <uuid> <json>")
+			if len(parts) != 2 {
+				fmt.Println("Usage: DELETE <uuid>")
 				continue
 			}
-			if err := r.Client.DeleteLog(parts[1], parts[2]); err != nil {
+			if err := r.Client.DeleteLog(parts[1]); err != nil {
 				fmt.Println("Error deleting log:", err)
 			} else {
 				fmt.Println("Log entry deleted.")
@@ -119,6 +127,6 @@ Available commands:
   EXIT                - Exit REPL
   SET <uuid> <json>   - Set a log entry
   GET <uuid>          - Get a log entry
-  DELETE <uuid> <json> - Delete a log entry
+  DELETE <uuid>       - Delete a log entry
 `)
 }

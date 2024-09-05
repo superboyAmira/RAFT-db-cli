@@ -15,6 +15,9 @@ service ClusterNode {
     rpc Append(LogLeadRequest) returns (Empty);
     rpc Delete(LogLeadRequest) returns (Empty);
     rpc Get(LogLeadRequest) returns (LogLeadResponse);
+
+    // redirect and client interface helper
+    rpc IsLead(Empty) returns (Empty); 
     
     // Candidate
     rpc StartElection(Empty) returns (ElectionDecision);

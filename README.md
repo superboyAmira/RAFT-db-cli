@@ -55,25 +55,26 @@ RAFT was proposed in 2014 by Diego Ongaro and John Ousterhout as an alternative 
 
   * The system automatically detects failures and initiates a new leader election or data recovery.
 
-
-#### Some notes to future README update
-~~Как только кластер получает лидера, он может принимать новые записи журнала.
-Клиент может запросить лидера добавить новую запись журнала,
-которая представляет собой непрозрачный двоичный объект в Raft.
-Затем лидер записывает запись в долговременное хранилище и пытается реплицировать ее
-в кворум последователей. Как только запись журнала считается зафиксированной ,
-ее можно применить к конечному автомату.
-Конечный автомат зависит от приложения и реализуется с помощью интерфейса.~~ 
-
 # Quick start
 
-To verify compliance with the RAFT principle. the global cluster logger should be changed to Debug Level. and see the result in the logs.This is a temporary solution, in the future there will be a more visual and easy-to-analyze test.
+To verify compliance with the RAFT principle. the global cluster logger should be changed to Info Level. and see the result in the logs.This is a temporary solution, in the future there will be a more visual and easy-to-analyze test.
 
 In the current implementation, all possible cases of election and recovery of node network errors have been handled. There is functionality for adding, deleting and viewing database records.
+
+For more detail information of protocol, you can set Logger level to Debug. (you need to perform it in a short time interval and write it to a file, since there will be a lot of logs)
+
+to start, use
+```cd cmd/warehouse-cli/```
+```go run main.go```
+
+you can write 'help or HELP' in REPL to see the possible commands
+
+* the current tests are located in the global test folder
 
 # Demonstration of the functionality
 
 Example of Set and Get Operations
+(with Info level)
 
 ```
 ➜  warehouse-cli git:(main) ✗ go run main.go
@@ -108,7 +109,35 @@ Cluster stopped.
 Exiting REPL...
 ```
 
+Example of Set, Get, Delete Operations
+(with Error(Prod) level)
 
-**There is a bug (once in a hundred damn tests) related to the election of an irrelevant leader. There is an understanding of how to rewrite the implementation in a more optimized way**
+```
+➜  warehouse-cli git:(main) ✗ go run main.go
+Connected to a database of Warehouse 13 at localhost:38503
+Known nodes:
+localhost:38503
+localhost:40727
+localhost:37167
+> SET 429420942 incorrect
+Error UUID4: invalid UUID length: 9
+> SET 0d5d3807-5fbf-4228-a657-5a091c4e497f some test
+Created (2 replicas)
+> GET 0d5d3807-5fbf-4228-a657-5a091c4e497f
+some test
+> 
+> DELETE 0d5d3807-5fbf-4228-a657-5a091c4e497f
+Log entry deleted.
+> SET 0d5d3807-5fbf-4228-a657-5a091c4e497f frefe
+Created (2 replicas)
+> 
+> Reconnected to a database of Warehouse 13 at localhost:40727
+>GET 0d5d3807-5fbf-4228-a657-5a091c4e497f
+frefe
+> cluster size (1) is smaller than a replication factor (2)!
+...
+```
+
+**There is an understanding of how to rewrite the implementation in a more optimized way**
 
 # thanks!

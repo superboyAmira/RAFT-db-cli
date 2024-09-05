@@ -82,7 +82,7 @@ func TestDeleteLog(t *testing.T) {
 	}
 	time.Sleep(10 * time.Millisecond)
 
-	err = man.DeleteLog(logs[0].Id, "")
+	err = man.DeleteLog(logs[0].Id)
 	if err != nil {
 		t.Error(err.Error())
 	}
@@ -103,7 +103,7 @@ func TestNetworkErrWith1Node(t *testing.T) {
 
 	man.StopCluster[0]()
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(1000 * time.Millisecond)
 
 	man.GracefullyStop()
 }
@@ -124,7 +124,7 @@ func TestNetworkErrWithLeadNodeWithReplica(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 	// lead died
 	man.StopCluster[0]()
-	time.Sleep(30 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 
 	// now we randomly calculate the timeout leader, so we need to look at the logs for a correct test
 
@@ -147,7 +147,7 @@ func TestNetworkErrWithNotLeadNodeWithReplica(t *testing.T) {
 	time.Sleep(5 * time.Millisecond)
 	// lead died
 	man.StopCluster[1]()
-	time.Sleep(30 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 
 	// now we randomly calculate the timeout leader, so we need to look at the logs for a correct test
 
